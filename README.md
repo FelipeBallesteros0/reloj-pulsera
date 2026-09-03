@@ -15,6 +15,18 @@ El plan completo y las decisiones están en `docs/plan.md`.
 - `respaldo/` — (no versionado) volcado completo de la flash de fábrica y resumen de eFuses.
 - `herramientas/` — scripts: pasar el USB a WSL, respaldar/restaurar flash, generar fuentes.
 
+## Emparejar con el iPhone (primera vez)
+
+iOS 16+ **no muestra en Ajustes → Bluetooth** a los periféricos BLE genéricos, aunque soliciten ANCS (política de
+Apple; le pasa a todos los relojes caseros). El emparejamiento inicial se hace desde una app de escaneo BLE:
+
+1. Instalar **nRF Connect for Mobile** (Nordic) en el iPhone.
+2. Scanner → SCAN → conectar a **"Reloj"**. El reloj pide cifrado y iOS muestra su diálogo "Solicitud de enlace" → Enlazar.
+3. Listo: el bond queda en el sistema; iOS reconecta solo cada vez que el reloj anuncia (sin la app). Al vincular,
+   el reloj toma la hora del iPhone (Current Time Service) y la guarda en el RTC.
+
+Para desemparejar: en el reloj, Ajustes → "Olvidar iPhone"; en el iPhone, Ajustes → Bluetooth → "Omitir dispositivo".
+
 ## Compilar y flashear
 
 Flujo por defecto: **compilar en WSL, flashear y leer la consola desde Windows** (esptool nativo en COM3).
@@ -25,8 +37,14 @@ congelada en 172 KB); el esptool de Windows lee/escribe los 16 MB en ~1 minuto.
 idf                                  # alias de ". ~/esp/esp-idf/export.sh"
 cd firmware && idf.py build          # compila (ESP-IDF v5.5.5, target esp32c6)
 ../herramientas/flash_win.sh         # flashea firmware/build por COM3 (py.exe -m esptool)
-../herramientas/monitor_win.sh 15    # captura 15 s de consola (añade --reset para reiniciar antes)
+../herramientas/monitor_win.sh 15 COM3 --reset   # captura 15 s de consola reiniciando el reloj (ver nota)
 ```
+
+Nota sobre la consola: la salida por USB-Serial/JTAG solo llega si el puerto está abierto **desde el arranque**; si
+se abre después, no sale nada. Por eso el monitor se usa con `--reset`. Para capturas largas en segundo plano usar
+`SALIDA=C:/ruta/consola.log herramientas/monitor_win.sh 1200 COM3 --reset` (escribe el archivo directamente; la
+salida estándar de un .exe lanzado en segundo plano desde WSL llega vacía). La primera línea del archivo trae el
+PID de Windows para pararlo: `powershell Stop-Process -Id <pid>`.
 
 Otras herramientas:
 
