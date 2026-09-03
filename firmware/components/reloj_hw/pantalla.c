@@ -56,7 +56,7 @@ esp_err_t pantalla_init(void)
         .monochrome = false,
         .color_format = LV_COLOR_FORMAT_RGB565,
         .rotation = { .swap_xy = false, .mirror_x = false, .mirror_y = false },
-        .flags = { .buff_dma = false, .swap_bytes = true, .sw_rotate = false },
+        .flags = { .buff_dma = false, .swap_bytes = true, .sw_rotate = false },   // sw_rotate=true cuesta otro buffer de 33 KB; el "swap_xy not supported" del log es inofensivo
     };
     disp = lvgl_port_add_disp(&dcfg);
     ESP_RETURN_ON_FALSE(disp, ESP_FAIL, TAG, "lvgl_port_add_disp");

@@ -62,6 +62,9 @@ static void refrescar_bateria(void)
     ui_bateria(pmic_bateria_pct(), pmic_cargando(), pmic_usb_conectado());
     ui_ram((unsigned)(esp_get_free_heap_size() / 1024));
     pantalla_unlock();
+    ESP_LOGI(TAG, "latido: RAM libre %u B, batería %d %% (%d mV), USB %s, BLE %d, pantalla %s",
+             (unsigned)esp_get_free_heap_size(), pmic_bateria_pct(), pmic_bateria_mv(),
+             pmic_usb_conectado() ? "sí" : "no", (int)ble_estado(), pantalla_encendida() ? "on" : "off");
 }
 
 void app_main(void)
@@ -131,6 +134,9 @@ void app_main(void)
         // Botón PWR (llega por el PMIC) y eventos de USB/carga.
         pmic_eventos_t pe;
         pmic_sondear(&pe);
+        if (pe.pwr_corto || pe.pwr_largo) {
+            ESP_LOGI(TAG, "botón PWR %s", pe.pwr_largo ? "largo" : "corto");
+        }
         if (pe.pwr_corto) {
             if (pantalla_encendida()) {
                 apagar_pantalla();

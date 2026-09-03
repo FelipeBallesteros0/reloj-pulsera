@@ -43,25 +43,31 @@ static void publicar_estado(ble_estado_t e)
 
 static void anunciar(void)
 {
+    // Todo en el paquete principal (máx. 31 B): flags (3) + solicitud de ANCS (18) + nombre corto (2 + n).
+    // Así iOS no depende de la respuesta de escaneo. Con "Reloj" son 28 B; el nombre largo iría en la respuesta.
     struct ble_hs_adv_fields f = { 0 };
     struct ble_hs_adv_fields rsp = { 0 };
+    const char *nombre = ble_svc_gap_device_name();
+    size_t largo = strlen(nombre);
+    bool cabe = 3 + 18 + 2 + largo <= 31;
 
-    // Datos del anuncio (máx. 31 B): flags + solicitud de ANCS (18 B) + apariencia "reloj".
     f.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     f.sol_uuids128 = &UUID_ANCS;
     f.sol_num_uuids128 = 1;
-    f.appearance = 0x00C0;   // Generic Watch
-    f.appearance_is_present = 1;
+    if (cabe) {
+        f.name = (uint8_t *)nombre;
+        f.name_len = largo;
+        f.name_is_complete = 1;
+    } else {
+        rsp.name = (uint8_t *)nombre;
+        rsp.name_len = largo;
+        rsp.name_is_complete = 1;
+    }
     int rc = ble_gap_adv_set_fields(&f);
     if (rc) {
         ESP_LOGE(TAG, "adv_set_fields rc=%d", rc);
         return;
     }
-    // El nombre va en la respuesta de escaneo (no cabe junto al UUID de 128 bits).
-    const char *nombre = ble_svc_gap_device_name();
-    rsp.name = (uint8_t *)nombre;
-    rsp.name_len = strlen(nombre);
-    rsp.name_is_complete = 1;
     rc = ble_gap_adv_rsp_set_fields(&rsp);
     if (rc) {
         ESP_LOGE(TAG, "adv_rsp_set_fields rc=%d", rc);
@@ -75,7 +81,7 @@ static void anunciar(void)
         ESP_LOGE(TAG, "adv_start rc=%d", rc);
         return;
     }
-    ESP_LOGI(TAG, "anunciando como \"%s\"", nombre);
+    ESP_LOGI(TAG, "anunciando como \"%s\" (nombre %s)", nombre, cabe ? "en el anuncio" : "en la respuesta de escaneo");
     publicar_estado(BLE_ANUNCIANDO);
 }
 
@@ -196,7 +202,6 @@ esp_err_t ble_init(const char *nombre, QueueHandle_t q)
     ble_svc_gap_init();
     ble_svc_gatt_init();
     ble_svc_gap_device_name_set(nombre);
-    ble_svc_gap_device_appearance_set(0x00C0);
     ble_store_config_init();
 
     nimble_port_freertos_init(tarea_host);

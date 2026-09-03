@@ -2,7 +2,7 @@ menu "Reloj"
 
     config RELOJ_NOMBRE_BLE
         string "Nombre Bluetooth del reloj"
-        default "Reloj Felipe"
+        default "Reloj"
 
     config RELOJ_PANTALLA_SEGUNDOS
         int "Segundos sin tocar antes de apagar la pantalla"
