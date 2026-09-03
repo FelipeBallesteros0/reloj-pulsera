@@ -1,0 +1,18 @@
+menu "Reloj"
+
+    config RELOJ_NOMBRE_BLE
+        string "Nombre Bluetooth del reloj"
+        default "Reloj Felipe"
+
+    config RELOJ_PANTALLA_SEGUNDOS
+        int "Segundos sin tocar antes de apagar la pantalla"
+        default 20
+        range 5 600
+
+    config RELOJ_TZ
+        string "Zona horaria (formato POSIX TZ)"
+        default "<-04>4<-03>,M9.1.6/24,M4.1.6/24"
+        help
+            Por defecto Chile continental (UTC-4 con horario de verano UTC-3).
+
+endmenu
