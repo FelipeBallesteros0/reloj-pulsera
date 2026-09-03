@@ -3,6 +3,7 @@
 // iPhone lo liste en Ajustes → Bluetooth, se empareja con bonding (Just Works) y, ya cifrado, lee la hora (CTS).
 #include <stdbool.h>
 #include <time.h>
+#include <stdint.h>
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -20,13 +21,29 @@ typedef enum {
 typedef enum {
     BLE_EV_ESTADO = 0,    // cambió el estado (payload: estado)
     BLE_EV_HORA,          // el iPhone entregó la hora (payload: hora)
+    BLE_EV_NOTIF,         // novedad en las notificaciones (payload: notif)
+    BLE_EV_ANCS,          // ANCS quedó suscrito (payload: ancs_listo)
 } ble_evento_tipo_t;
+
+typedef enum {
+    BLE_NOTIF_NUEVA = 0,      // llegó una notificación (aún sin título/mensaje)
+    BLE_NOTIF_MODIFICADA,
+    BLE_NOTIF_DETALLE,        // ya tiene título/mensaje; aviso=true si merece tarjeta emergente
+    BLE_NOTIF_QUITADA,        // el iPhone la descartó
+    BLE_NOTIF_APP,            // se resolvió el nombre de una app (refrescar textos)
+} ble_notif_tipo_t;
 
 typedef struct {
     ble_evento_tipo_t tipo;
     union {
         ble_estado_t estado;
         struct tm hora;
+        struct {
+            ble_notif_tipo_t tipo;
+            uint32_t uid;
+            bool aviso;
+        } notif;
+        bool ancs_listo;
     };
 } ble_evento_t;
 

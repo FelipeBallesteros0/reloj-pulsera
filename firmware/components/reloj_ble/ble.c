@@ -1,5 +1,6 @@
 #include "ble.h"
 #include "cts.h"
+#include "ancs.h"
 #include <string.h>
 #include <stdio.h>
 #include "esp_log.h"
@@ -116,6 +117,7 @@ static int gap_evento(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "desconectado (motivo %d)", ev->disconnect.reason);
         conn_handle = BLE_HS_CONN_HANDLE_NONE;
+        ancs_desconectado();
         anunciar();
         return 0;
 
@@ -129,7 +131,7 @@ static int gap_evento(struct ble_gap_event *ev, void *arg)
             ble_gap_conn_find(ev->enc_change.conn_handle, &d);
             ESP_LOGI(TAG, "enlace cifrado (bonded=%d, autenticado=%d)", d.sec_state.bonded, d.sec_state.authenticated);
             publicar_estado(BLE_VINCULADO);
-            cts_leer(ev->enc_change.conn_handle);
+            cts_leer(ev->enc_change.conn_handle, ancs_iniciar);   // hora primero, luego notificaciones
         } else {
             // Caso típico: el iPhone "olvidó" el reloj pero nosotros aún guardábamos su bond.
             ESP_LOGW(TAG, "cifrado falló (status %d): borro el bond y corto para reemparejar limpio", ev->enc_change.status);
@@ -152,8 +154,16 @@ static int gap_evento(struct ble_gap_event *ev, void *arg)
         ESP_LOGI(TAG, "MTU %d", ev->mtu.value);
         return 0;
 
-    case BLE_GAP_EVENT_NOTIFY_RX:
-        return 0;   // F2: notificaciones ANCS
+    case BLE_GAP_EVENT_NOTIFY_RX: {
+        uint8_t buf[256];
+        uint16_t n = OS_MBUF_PKTLEN(ev->notify_rx.om);
+        if (n > sizeof(buf)) {
+            n = sizeof(buf);
+        }
+        os_mbuf_copydata(ev->notify_rx.om, 0, n, buf);
+        ancs_notificacion_rx(ev->notify_rx.attr_handle, buf, n);
+        return 0;
+    }
 
     default:
         return 0;

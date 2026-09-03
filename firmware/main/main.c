@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -16,12 +17,19 @@
 #include "rtc_pcf85063.h"
 #include "boton_boot.h"
 #include "ble.h"
+#include "ancs.h"
+#include "ancs_proto.h"
+#include "notif_store.h"
 #include "ui.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "reloj";
 static QueueHandle_t cola;
 static int64_t t_apagado_ms;
+static SemaphoreHandle_t mtx_notif;
+
+static void notif_lock(void) { xSemaphoreTake(mtx_notif, portMAX_DELAY); }
+static void notif_unlock(void) { xSemaphoreGive(mtx_notif); }
 
 static void log_ram(const char *momento)
 {
@@ -47,6 +55,70 @@ static void cb_olvidar(void)
     ble_olvidar();
 }
 
+// Desde la UI (tarea LVGL): "Descartar" quita la notificación también en el iPhone.
+static void cb_descartar(uint32_t uid)
+{
+    ancs_accion(uid, false);
+    notif_store_quitar(uid);
+    ui_notifs_refrescar();   // ya estamos en la tarea LVGL, con su mutex tomado
+}
+
+static void cb_llamada(uint32_t uid, bool contestar)
+{
+    ESP_LOGI(TAG, "llamada %lu: %s", (unsigned long)uid, contestar ? "contestar" : "rechazar");
+    ancs_accion(uid, contestar);
+}
+
+static void refrescar_notifs(void)
+{
+    pantalla_lock(0);
+    ui_notifs_refrescar();
+    pantalla_unlock();
+}
+
+static void evento_notif(const ble_evento_t *ev)
+{
+    notif_t n;
+    bool existe = notif_store_buscar(ev->notif.uid, &n);
+    switch (ev->notif.tipo) {
+    case BLE_NOTIF_NUEVA:
+        refrescar_notifs();
+        if (existe && n.categoria == ANCS_CAT_LLAMADA && !(n.flags & ANCS_FLAG_PREEXISTENTE)) {
+            pantalla_encender();
+            pantalla_lock(0);
+            ui_llamada(ev->notif.uid, true);
+            pantalla_unlock();
+        }
+        break;
+    case BLE_NOTIF_MODIFICADA:
+    case BLE_NOTIF_APP:
+        refrescar_notifs();
+        break;
+    case BLE_NOTIF_DETALLE:
+        refrescar_notifs();
+        if (ev->notif.aviso && existe && n.categoria != ANCS_CAT_LLAMADA) {
+            pantalla_encender();
+            pantalla_lock(0);
+            ui_aviso(ev->notif.uid);
+            pantalla_unlock();
+        } else if (existe && n.categoria == ANCS_CAT_LLAMADA) {
+            pantalla_lock(0);
+            uint32_t en_curso;
+            if (ui_en_llamada(&en_curso) && en_curso == ev->notif.uid) {
+                ui_llamada(ev->notif.uid, true);   // ahora con el nombre del que llama
+            }
+            pantalla_unlock();
+        }
+        break;
+    case BLE_NOTIF_QUITADA:
+        pantalla_lock(0);
+        ui_llamada(ev->notif.uid, false);
+        ui_notifs_refrescar();
+        pantalla_unlock();
+        break;
+    }
+}
+
 static void apagar_pantalla(void)
 {
     pantalla_lock(0);
@@ -65,6 +137,8 @@ static void refrescar_bateria(void)
     ESP_LOGI(TAG, "latido: RAM libre %u B, batería %d %% (%d mV), USB %s, BLE %d, pantalla %s",
              (unsigned)esp_get_free_heap_size(), pmic_bateria_pct(), pmic_bateria_mv(),
              pmic_usb_conectado() ? "sí" : "no", (int)ble_estado(), pantalla_encendida() ? "on" : "off");
+    ESP_LOGI(TAG, "notificaciones: %d guardadas, %d sin leer, ANCS %s", notif_store_cantidad(), notif_store_no_leidas(),
+             ancs_listo() ? "suscrito" : "no");
 }
 
 void app_main(void)
@@ -79,7 +153,10 @@ void app_main(void)
     tzset();
     log_ram("al arrancar");
 
-    cola = xQueueCreate(8, sizeof(ble_evento_t));
+    cola = xQueueCreate(16, sizeof(ble_evento_t));
+    mtx_notif = xSemaphoreCreateMutex();
+    notif_store_set_lock(notif_lock, notif_unlock);
+    notif_store_init();
     ESP_ERROR_CHECK(pantalla_init());
     log_ram("tras pantalla + LVGL");
 
@@ -102,6 +179,8 @@ void app_main(void)
     ui_init(CONFIG_RELOJ_NOMBRE_BLE, pantalla_brillo_actual());
     ui_al_olvidar(cb_olvidar);
     ui_al_cambiar_brillo(pantalla_brillo);
+    ui_al_descartar(cb_descartar);
+    ui_al_llamada(cb_llamada);
     pantalla_unlock();
     refrescar_bateria();
     log_ram("con la UI creada");
@@ -127,6 +206,12 @@ void app_main(void)
             case BLE_EV_HORA:
                 aplicar_hora(&ev.hora);
                 ultimo_seg = 0;
+                break;
+            case BLE_EV_NOTIF:
+                evento_notif(&ev);
+                break;
+            case BLE_EV_ANCS:
+                ESP_LOGI(TAG, "notificaciones del iPhone %s", ev.ancs_listo ? "activas" : "inactivas");
                 break;
             }
         }

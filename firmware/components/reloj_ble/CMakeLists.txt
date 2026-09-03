@@ -1,3 +1,3 @@
-idf_component_register(SRCS "ble.c" "cts.c" "cts_parse.c"
+idf_component_register(SRCS "ble.c" "cts.c" "cts_parse.c" "ancs.c"
                        INCLUDE_DIRS "include"
-                       REQUIRES bt nvs_flash)
+                       REQUIRES bt nvs_flash reloj_notif esp_timer)
