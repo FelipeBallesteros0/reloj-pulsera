@@ -26,10 +26,13 @@
 static const char *TAG = "reloj";
 static QueueHandle_t cola;
 static int64_t t_apagado_ms;
+static int64_t t_encendido_ms;      // último encendido por evento (notificación, botón): cuenta como actividad
 static SemaphoreHandle_t mtx_notif;
 
 static void notif_lock(void) { xSemaphoreTake(mtx_notif, portMAX_DELAY); }
 static void notif_unlock(void) { xSemaphoreGive(mtx_notif); }
+
+static void encender_pantalla(void);
 
 static void log_ram(const char *momento)
 {
@@ -84,7 +87,7 @@ static void evento_notif(const ble_evento_t *ev)
     case BLE_NOTIF_NUEVA:
         refrescar_notifs();
         if (existe && n.categoria == ANCS_CAT_LLAMADA && !(n.flags & ANCS_FLAG_PREEXISTENTE)) {
-            pantalla_encender();
+            encender_pantalla();
             pantalla_lock(0);
             ui_llamada(ev->notif.uid, true);
             pantalla_unlock();
@@ -97,7 +100,7 @@ static void evento_notif(const ble_evento_t *ev)
     case BLE_NOTIF_DETALLE:
         refrescar_notifs();
         if (ev->notif.aviso && existe && n.categoria != ANCS_CAT_LLAMADA) {
-            pantalla_encender();
+            encender_pantalla();
             pantalla_lock(0);
             ui_aviso(ev->notif.uid);
             pantalla_unlock();
@@ -117,6 +120,12 @@ static void evento_notif(const ble_evento_t *ev)
         pantalla_unlock();
         break;
     }
+}
+
+static void encender_pantalla(void)
+{
+    pantalla_encender();
+    t_encendido_ms = ahora_ms();
 }
 
 static void apagar_pantalla(void)
@@ -226,11 +235,11 @@ void app_main(void)
             if (pantalla_encendida()) {
                 apagar_pantalla();
             } else {
-                pantalla_encender();
+                encender_pantalla();
             }
         }
         if (pe.pwr_largo) {
-            pantalla_encender();
+            encender_pantalla();
             pantalla_lock(0);
             ui_ir_ajustes();
             pantalla_unlock();
@@ -255,12 +264,13 @@ void app_main(void)
 
         // Pantalla: se apaga sola por inactividad y despierta con un toque.
         uint32_t sin_tocar = pantalla_ms_sin_tocar();
+        int64_t limite = (int64_t)CONFIG_RELOJ_PANTALLA_SEGUNDOS * 1000;
         if (pantalla_encendida()) {
-            if (sin_tocar > (uint32_t)CONFIG_RELOJ_PANTALLA_SEGUNDOS * 1000u) {
+            if ((int64_t)sin_tocar > limite && ahora_ms() - t_encendido_ms > limite) {
                 apagar_pantalla();
             }
         } else if ((int64_t)sin_tocar < ahora_ms() - t_apagado_ms) {
-            pantalla_encender();   // hubo un toque después de apagarla
+            encender_pantalla();   // hubo un toque después de apagarla
         }
     }
 }
