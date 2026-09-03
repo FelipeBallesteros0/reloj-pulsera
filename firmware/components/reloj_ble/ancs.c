@@ -184,6 +184,7 @@ bool ancs_notificacion_rx(uint16_t attr_handle, const uint8_t *datos, uint16_t l
 
 // --- Descubrimiento y suscripción -------------------------------------------------------------
 
+static void suscribir(uint16_t c, uint16_t cccd);
 static int al_suscribir(uint16_t c, const struct ble_gatt_error *err, struct ble_gatt_attr *attr, void *arg)
 {
     uint16_t cual = (uint16_t)(uintptr_t)arg;
@@ -192,9 +193,7 @@ static int al_suscribir(uint16_t c, const struct ble_gatt_error *err, struct ble
         return 0;
     }
     if (cual == h_ds_cccd) {
-        // Primero el Data Source (para no perder respuestas), después el Notification Source.
-        static const uint8_t on[2] = { 0x01, 0x00 };
-        ble_gattc_write_flat(c, h_ns_cccd, on, sizeof(on), al_suscribir, (void *)(uintptr_t)h_ns_cccd);
+        suscribir(c, h_ns_cccd);
     } else {
         listo = true;
         ESP_LOGI(TAG, "suscrito: ya llegan las notificaciones del iPhone");
@@ -204,25 +203,58 @@ static int al_suscribir(uint16_t c, const struct ble_gatt_error *err, struct ble
     return 0;
 }
 
+// Fin del rango de descriptores de una característica: justo antes de la declaración de la siguiente.
+static uint16_t fin_descriptores(uint16_t val)
+{
+    uint16_t sig = 0xFFFF;
+    const uint16_t otros[3] = { h_ns, h_cp, h_ds };
+    for (int i = 0; i < 3; i++) {
+        if (otros[i] > val && otros[i] < sig) {
+            sig = otros[i];
+        }
+    }
+    return sig == 0xFFFF ? svc_fin : (uint16_t)(sig - 2);   // la siguiente ocupa (declaración = val-1, valor)
+}
+
+static int al_suscribir(uint16_t c, const struct ble_gatt_error *err, struct ble_gatt_attr *attr, void *arg);
+
+static void suscribir(uint16_t c, uint16_t cccd)
+{
+    static const uint8_t on[2] = { 0x01, 0x00 };
+    int rc = ble_gattc_write_flat(c, cccd, on, sizeof(on), al_suscribir, (void *)(uintptr_t)cccd);
+    if (rc) {
+        ESP_LOGW(TAG, "no pude escribir el CCCD %d: rc=%d", cccd, rc);
+    }
+}
+
 static int al_descubrir_dsc(uint16_t c, const struct ble_gatt_error *err, uint16_t chr_val_handle,
                             const struct ble_gatt_dsc *dsc, void *arg)
 {
-    if (err->status == 0 && dsc && ble_uuid_cmp(&dsc->uuid.u, BLE_UUID16_DECLARE(0x2902)) == 0) {
-        if (chr_val_handle == h_ns) {
-            h_ns_cccd = dsc->handle;
-        } else if (chr_val_handle == h_ds) {
-            h_ds_cccd = dsc->handle;
+    if (err->status == 0 && dsc) {
+        char u[40];
+        ble_uuid_to_str(&dsc->uuid.u, u);
+        ESP_LOGI(TAG, "descriptor de %d: handle %d uuid %s", chr_val_handle, dsc->handle, u);
+        if (ble_uuid_cmp(&dsc->uuid.u, BLE_UUID16_DECLARE(0x2902)) == 0) {
+            if (chr_val_handle == h_ns) {
+                h_ns_cccd = dsc->handle;
+            } else if (chr_val_handle == h_ds) {
+                h_ds_cccd = dsc->handle;
+            }
         }
     } else if (err->status == BLE_HS_EDONE) {
         if (chr_val_handle == h_ns) {
-            // Ahora los descriptores del Data Source
-            ble_gattc_disc_all_dscs(c, h_ds, svc_fin, al_descubrir_dsc, NULL);
+            int rc = ble_gattc_disc_all_dscs(c, h_ds, fin_descriptores(h_ds), al_descubrir_dsc, NULL);
+            if (rc) {
+                ESP_LOGW(TAG, "disc_all_dscs(DS) rc=%d", rc);
+            }
         } else if (h_ns_cccd && h_ds_cccd) {
-            static const uint8_t on[2] = { 0x01, 0x00 };
-            ble_gattc_write_flat(c, h_ds_cccd, on, sizeof(on), al_suscribir, (void *)(uintptr_t)h_ds_cccd);
+            ESP_LOGI(TAG, "CCCD: NS=%d DS=%d; suscribiendo", h_ns_cccd, h_ds_cccd);
+            suscribir(c, h_ds_cccd);   // primero el Data Source, luego el Notification Source
         } else {
-            ESP_LOGW(TAG, "no encontré los descriptores CCCD de ANCS");
+            ESP_LOGW(TAG, "no encontré los descriptores CCCD de ANCS (NS=%d DS=%d)", h_ns_cccd, h_ds_cccd);
         }
+    } else {
+        ESP_LOGW(TAG, "descubrimiento de descriptores de %d: status %d", chr_val_handle, err->status);
     }
     return 0;
 }
@@ -239,10 +271,11 @@ static int al_descubrir_chr(uint16_t c, const struct ble_gatt_error *err, const 
         }
     } else if (err->status == BLE_HS_EDONE) {
         if (h_ns && h_cp && h_ds) {
-            ESP_LOGI(TAG, "características ANCS: NS=%d CP=%d DS=%d", h_ns, h_cp, h_ds);
-            // Descriptores del Notification Source (su rango termina donde empieza la siguiente característica; usamos el
-            // fin del servicio: NimBLE filtra por handle de la característica)
-            ble_gattc_disc_all_dscs(c, h_ns, svc_fin, al_descubrir_dsc, NULL);
+            ESP_LOGI(TAG, "características ANCS: NS=%d CP=%d DS=%d (servicio %d-%d)", h_ns, h_cp, h_ds, svc_inicio, svc_fin);
+            int rc = ble_gattc_disc_all_dscs(c, h_ns, fin_descriptores(h_ns), al_descubrir_dsc, NULL);
+            if (rc) {
+                ESP_LOGW(TAG, "disc_all_dscs(NS) rc=%d", rc);
+            }
         } else {
             ESP_LOGW(TAG, "faltan características ANCS (NS=%d CP=%d DS=%d)", h_ns, h_cp, h_ds);
         }
