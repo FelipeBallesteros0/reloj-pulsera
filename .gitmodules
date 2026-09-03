@@ -1,0 +1,3 @@
+[submodule "referencias/waveshare"]
+	path = referencias/waveshare
+	url = https://github.com/waveshareteam/ESP32-C6-Touch-AMOLED-2.06

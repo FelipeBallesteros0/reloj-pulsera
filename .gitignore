@@ -1,0 +1,13 @@
+# Artefactos de compilación de ESP-IDF
+firmware/build/
+firmware/managed_components/
+firmware/dependencies.lock
+firmware/sdkconfig
+firmware/sdkconfig.old
+# Respaldos de flash (16 MB cada uno) y binarios de fábrica
+respaldo/
+*.bin
+# Varios
+__pycache__/
+*.pyc
+.vscode/
