@@ -1,0 +1,4 @@
+dependencies:
+  cube32esp/xpowerslib:
+    version: "^0.3.3"
+    public: true
