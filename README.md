@@ -15,10 +15,24 @@ El plan completo y las decisiones están en `docs/plan.md`.
 - `respaldo/` — (no versionado) volcado completo de la flash de fábrica y resumen de eFuses.
 - `herramientas/` — scripts: pasar el USB a WSL, respaldar/restaurar flash, generar fuentes.
 
-## Compilar y flashear (WSL)
+## Compilar y flashear
+
+Flujo por defecto: **compilar en WSL, flashear y leer la consola desde Windows** (esptool nativo en COM3).
+usbip funciona para adjuntar el reloj a WSL, pero se atasca en transferencias masivas (una lectura de flash quedó
+congelada en 172 KB); el esptool de Windows lee/escribe los 16 MB en ~1 minuto.
 
 ```bash
-idf                      # alias de ". ~/esp/esp-idf/export.sh"
-herramientas/usb.sh      # pasa el reloj (COM3 en Windows) a WSL como /dev/ttyACM0
-cd firmware && idf.py -p /dev/ttyACM0 flash monitor
+idf                                  # alias de ". ~/esp/esp-idf/export.sh"
+cd firmware && idf.py build          # compila (ESP-IDF v5.5.5, target esp32c6)
+../herramientas/flash_win.sh         # flashea firmware/build por COM3 (py.exe -m esptool)
+../herramientas/monitor_win.sh 15    # captura 15 s de consola (añade --reset para reiniciar antes)
 ```
+
+Otras herramientas:
+
+- `herramientas/usb.sh windows|wsl|estado` — si hace falta el reloj en WSL (`/dev/ttyACM0`, p. ej. `idf.py monitor`
+  interactivo), `usb.sh wsl` lo adjunta con re-attach automático; `usb.sh windows` lo devuelve a COM3.
+- `herramientas/respaldo_flash.sh` — volcado de 16 MB desde WSL (lento/atascable por usbip; preferir desde Windows:
+  `py.exe -m esptool --chip esp32c6 -p COM3 -b 921600 read-flash 0 0x1000000 C:/ruta/fabrica.bin`).
+- `herramientas/restaurar_fabrica.sh <imagen>` — vuelve a la fábrica desde `respaldo/` (o con esptool de Windows, `write-flash 0x0`).
+- Regla udev `/etc/udev/rules.d/99-esp32.rules` (MODE 0666 para VID 303a) para que WSL pueda abrir el puerto sin `dialout`.
