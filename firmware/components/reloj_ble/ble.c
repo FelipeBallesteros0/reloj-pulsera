@@ -103,14 +103,19 @@ static int gap_evento(struct ble_gap_event *ev, void *arg)
             ESP_LOGI(TAG, "conectado (handle %d)", conn_handle);
             publicar_estado(BLE_CONECTADO);
             ble_gattc_exchange_mtu(conn_handle, NULL, NULL);
-            int rc = ble_gap_security_initiate(conn_handle);   // pide cifrado + bonding → llega ENC_CHANGE
-            if (rc) {
-                ESP_LOGW(TAG, "security_initiate rc=%d", rc);
+            struct ble_gap_conn_desc d;
+            if (ble_gap_conn_find(conn_handle, &d) == 0 && d.sec_state.encrypted) {
+                // El iPhone ya cifró con el bond antes de que llegáramos aquí: no pedir nada (una petición de
+                // seguridad ignorada vence a los 30 s y NimBLE la reporta como fallo de cifrado).
+                ESP_LOGI(TAG, "el enlace ya venía cifrado");
+            } else {
+                int rc = ble_gap_security_initiate(conn_handle);   // pide cifrado + bonding → llega ENC_CHANGE
+                if (rc) {
+                    ESP_LOGW(TAG, "security_initiate rc=%d", rc);
+                }
             }
         } else {
-            ESP_LOGW(TAG, "conexión fallida: %d", ev->connect.status);
-            conn_handle = BLE_HS_CONN_HANDLE_NONE;
-            anunciar();
+            ESP_LOGW(TAG, "conexión fallida: %d (se reanuncia al llegar la desconexión)", ev->connect.status);
         }
         return 0;
 
@@ -133,10 +138,18 @@ static int gap_evento(struct ble_gap_event *ev, void *arg)
             publicar_estado(BLE_VINCULADO);
             cts_leer(ev->enc_change.conn_handle, ancs_iniciar);   // hora primero, luego notificaciones
         } else {
-            // Caso típico: el iPhone "olvidó" el reloj pero nosotros aún guardábamos su bond.
-            ESP_LOGW(TAG, "cifrado falló (status %d): borro el bond y corto para reemparejar limpio", ev->enc_change.status);
-            borrar_bond_del_par(ev->enc_change.conn_handle);
-            ble_gap_terminate(ev->enc_change.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            struct ble_gap_conn_desc d;
+            bool cifrado = ble_gap_conn_find(ev->enc_change.conn_handle, &d) == 0 && d.sec_state.encrypted;
+            if (cifrado) {
+                // Un procedimiento redundante venció (p. ej. nuestra petición ignorada); el enlace sigue cifrado.
+                ESP_LOGW(TAG, "procedimiento de seguridad falló (status %d) pero el enlace sigue cifrado; ignoro",
+                         ev->enc_change.status);
+            } else {
+                // Nunca borrar el bond aquí: si el iPhone nos olvidó, él mismo pedirá emparejar de nuevo
+                // (REPEAT_PAIRING); si el fallo fue transitorio, la clave sigue sirviendo. Solo cortamos.
+                ESP_LOGW(TAG, "cifrado falló (status %d): corto para que el iPhone reintente", ev->enc_change.status);
+                ble_gap_terminate(ev->enc_change.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            }
         }
         return 0;
 
