@@ -31,6 +31,7 @@ static lv_obj_t *llam_titulo, *llam_sub;
 static lv_obj_t *popup, *pop_app, *pop_titulo, *pop_msg;
 static lv_timer_t *popup_timer;
 static uint32_t uid_detalle, uid_popup, uid_llamada;
+static bool hay_llamada;
 static lv_obj_t *scr_antes_llamada;
 
 static ui_cb_t cb_olvidar;
@@ -562,12 +563,13 @@ void ui_llamada(uint32_t uid, bool mostrar)
             scr_antes_llamada = lv_screen_active();
         }
         uid_llamada = uid;
+        hay_llamada = true;
         lv_label_set_text(llam_titulo, n.titulo[0] ? n.titulo : "Llamada");
         lv_label_set_text(llam_sub, n.subtitulo[0] ? n.subtitulo : n.mensaje);
         lv_obj_add_flag(popup, LV_OBJ_FLAG_HIDDEN);
         lv_screen_load(scr_llamada);
-    } else if (lv_screen_active() == scr_llamada && uid == uid_llamada) {
-        uid_llamada = 0;
+    } else if (hay_llamada && lv_screen_active() == scr_llamada && uid == uid_llamada) {
+        hay_llamada = false;
         lv_screen_load(scr_antes_llamada ? scr_antes_llamada : scr_reloj);
     }
 }

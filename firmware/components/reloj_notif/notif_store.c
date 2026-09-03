@@ -31,9 +31,7 @@ static void quitar_indice(int i)
 
 bool notif_store_agregar(uint32_t uid, uint8_t categoria, uint8_t flags, uint32_t ahora_ms)
 {
-    if (uid == 0) {
-        return false;
-    }
+    // Ojo: el UID 0 es válido (iOS numera desde 0 en cada conexión).
     LOCK();
     notif_t nueva;
     int i = indice(uid);

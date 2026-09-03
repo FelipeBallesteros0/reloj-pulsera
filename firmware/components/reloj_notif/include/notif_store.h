@@ -28,7 +28,7 @@ typedef struct {
 void notif_store_init(void);
 void notif_store_vaciar(void);
 // Inserta (o reubica al frente si ya existía) una notificación con esos datos básicos. Si el anillo está lleno,
-// descarta la más antigua. Devuelve false solo si uid == 0.
+// descarta la más antigua. Cualquier uid es válido (iOS usa 0 para la primera de cada conexión).
 bool notif_store_agregar(uint32_t uid, uint8_t categoria, uint8_t flags, uint32_t ahora_ms);
 // Completa los atributos de una notificación existente. false si no está.
 bool notif_store_poner_detalle(uint32_t uid, const ancs_attrs_t *a);

@@ -135,7 +135,8 @@ static void test_anillo(void)
     CHECK(!notif_store_buscar(3, &n));                 // cayó del anillo
     CHECK(!notif_store_quitar(999));
     CHECK(notif_store_quitar(10) && notif_store_cantidad() == 23);
-    CHECK(!notif_store_agregar(0, 0, 0, 0));
+    CHECK(notif_store_agregar(0, 0, 0, 0) && notif_store_cantidad() == NOTIF_MAX);   // el uid 0 es válido
+    CHECK(notif_store_quitar(0) && notif_store_cantidad() == 23);
     ancs_attrs_t at = { .uid = 20 };
     strcpy(at.titulo, "Hola");
     strcpy(at.mensaje, "qué tal");
