@@ -31,7 +31,8 @@ static char acum[1024];                   // mensajes de texto que llegan fragme
 static size_t acum_len;
 static esp_timer_handle_t timer_vigilante, timer_ping;
 static char id_reloj[13];
-static bool con_adpcm;                    // el servidor aceptó audio comprimido 4:1 en ambos sentidos
+static bool con_adpcm;                    // subida comprimida 4:1 (ADPCM) aceptada por el servidor
+static bool bajada_adpcm;                 // la voz de vuelta viene en ADPCM (túnel) o en PCM (LAN, sin siseo)
 static adpcm_estado_t codificador, decodificador;
 static struct { int tramas, mensajes, fallidas, descartadas; int64_t total_us, max_us; } envio;   // subida de audio
 
@@ -168,9 +169,11 @@ static void procesar_mensaje(const char *json)
 
     if (strcmp(tipo, "hola") == 0) {
         const cJSON *audio = cJSON_GetObjectItem(m, "audio");
+        const cJSON *bajada = cJSON_GetObjectItem(m, "bajada");
         con_adpcm = cJSON_IsString(audio) && strcmp(audio->valuestring, "adpcm") == 0;
+        bajada_adpcm = cJSON_IsString(bajada) ? strcmp(bajada->valuestring, "adpcm") == 0 : con_adpcm;
         saludado = true;
-        ESP_LOGI(TAG, "servidor listo (audio %s)", con_adpcm ? "adpcm" : "pcm");
+        ESP_LOGI(TAG, "servidor listo (subida %s, bajada %s)", con_adpcm ? "adpcm" : "pcm", bajada_adpcm ? "adpcm" : "pcm");
     } else if (strcmp(tipo, "activada") == 0) {
         armar_vigilante();
         fallos_seguidos = 0;
@@ -274,7 +277,7 @@ static void recibir_audio(const uint8_t *d, size_t n, size_t offset)
         esp_timer_stop(timer_vigilante);
         esp_timer_start_once(timer_vigilante, 15 * 1000000ULL);   // cada bloque que llega renueva el plazo
     }
-    if (!con_adpcm) {
+    if (!bajada_adpcm) {
         alimentar_audio(d, n);
         return;
     }
@@ -309,8 +312,9 @@ static void al_evento_ws(void *arg, esp_event_base_t base, int32_t id, void *dat
             ESP_LOGW(TAG, "no pude quitar Nagle al socket %d", fd);
         }
         char hola[160];
-        snprintf(hola, sizeof(hola), "{\"t\":\"hola\",\"token\":\"%s\",\"reloj\":\"%s\",\"v\":1,\"audio\":\"adpcm\"}",
-                 CONFIG_RELOJ_ANDIA_TOKEN, id_reloj);
+        // Subida siempre comprimida; la bajada en PCM cuando vamos por la LAN (sobra ancho de banda, sin siseo).
+        snprintf(hola, sizeof(hola), "{\"t\":\"hola\",\"token\":\"%s\",\"reloj\":\"%s\",\"v\":1,\"audio\":\"adpcm\",\"bajada\":\"%s\"}",
+                 CONFIG_RELOJ_ANDIA_TOKEN, id_reloj, cliente_lan ? "pcm" : "adpcm");
         esp_websocket_client_send_text(ws, hola, strlen(hola), pdMS_TO_TICKS(1000));
         ESP_LOGI(TAG, "WebSocket conectado");
         break;

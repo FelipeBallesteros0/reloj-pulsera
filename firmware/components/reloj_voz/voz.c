@@ -36,7 +36,8 @@ esp_err_t voz_init(void)
     anillo_init(&anillo, mem_anillo, sizeof(mem_anillo));
     // Una sola tarea permanente para captura y reproducción (nunca ocurren a la vez): así no hay que reservar
     // pila en plena conversación, cuando la RAM está en su mínimo con TLS abierto.
-    ESP_RETURN_ON_FALSE(xTaskCreate(tarea_voz, "voz", 4096, NULL, 5, &tarea) == pdPASS, ESP_FAIL, TAG, "tarea");
+    // Prioridad por encima del cliente WebSocket (5) y de LVGL (4): el DMA del altavoz no debe quedarse sin datos.
+    ESP_RETURN_ON_FALSE(xTaskCreate(tarea_voz, "voz", 4096, NULL, 6, &tarea) == pdPASS, ESP_FAIL, TAG, "tarea");
     ESP_LOGI(TAG, "códec listo (16 kHz mono)");
     return ESP_OK;
 }
@@ -77,7 +78,7 @@ static void tarea_voz(void *p)
                 continue;
             }
             tocando = true;
-            size_t n = anillo_leer(&anillo, (uint8_t *)buf, 512);
+            size_t n = anillo_leer(&anillo, (uint8_t *)buf, sizeof(buf));   // 1024 B = 32 ms por escritura
             if (n == 0) {
                 if (fin_audio) {
                     reproduciendo = false;
