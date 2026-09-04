@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define NOTIF_MAX 24
+#define NOTIF_MAX 12   // 12 × ~360 B; la RAM del C6 con WiFi + BLE no da para más
 
 typedef struct {
     uint32_t uid;

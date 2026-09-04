@@ -12,7 +12,7 @@ static const char *TAG = "voz";
 static esp_codec_dev_handle_t mic, alt;
 static void (*cb_captura)(const uint8_t *, size_t);
 static volatile bool capturando, reproduciendo, fin_audio;
-static uint8_t mem_anillo[16 * 1024];      // 0,5 s de audio mono (la reserva es de 200 ms)
+static uint8_t mem_anillo[12 * 1024];      // 375 ms de audio mono (la reserva es de 200 ms)
 static anillo_t anillo;
 #define RESERVA (VOZ_TASA * 2 * 200 / 1000)
 
@@ -54,7 +54,7 @@ esp_err_t voz_capturar_iniciar(void (*cb)(const uint8_t *, size_t))
     }
     cb_captura = cb;
     capturando = true;
-    return xTaskCreate(tarea_captura, "voz_cap", 4096, NULL, 5, NULL) == pdPASS ? ESP_OK : ESP_FAIL;
+    return xTaskCreate(tarea_captura, "voz_cap", 3072, NULL, 5, NULL) == pdPASS ? ESP_OK : ESP_FAIL;
 }
 
 void voz_capturar_detener(void) { capturando = false; }
@@ -88,7 +88,7 @@ size_t voz_reproducir_alimentar(const uint8_t *pcm, size_t n)
     if (!reproduciendo) {
         reproduciendo = true;
         fin_audio = false;
-        xTaskCreate(tarea_reproduccion, "voz_rep", 4096, NULL, 5, NULL);
+        xTaskCreate(tarea_reproduccion, "voz_rep", 3072, NULL, 5, NULL);
     }
     return cupo;
 }

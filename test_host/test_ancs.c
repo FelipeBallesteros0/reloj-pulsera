@@ -130,13 +130,13 @@ static void test_anillo(void)
     CHECK(notif_store_cantidad() == NOTIF_MAX);
     notif_t n;
     CHECK(notif_store_obtener(0, &n) && n.uid == 30);
-    CHECK(notif_store_obtener(NOTIF_MAX - 1, &n) && n.uid == 7);
+    CHECK(notif_store_obtener(NOTIF_MAX - 1, &n) && n.uid == 30 - NOTIF_MAX + 1);
     CHECK(!notif_store_obtener(NOTIF_MAX, &n));
     CHECK(!notif_store_buscar(3, &n));                 // cayó del anillo
     CHECK(!notif_store_quitar(999));
-    CHECK(notif_store_quitar(10) && notif_store_cantidad() == 23);
+    CHECK(notif_store_quitar(30) && notif_store_cantidad() == NOTIF_MAX - 1);
     CHECK(notif_store_agregar(0, 0, 0, 0) && notif_store_cantidad() == NOTIF_MAX);   // el uid 0 es válido
-    CHECK(notif_store_quitar(0) && notif_store_cantidad() == 23);
+    CHECK(notif_store_quitar(0) && notif_store_cantidad() == NOTIF_MAX - 1);
     ancs_attrs_t at = { .uid = 20 };
     strcpy(at.titulo, "Hola");
     strcpy(at.mensaje, "qué tal");
@@ -145,10 +145,10 @@ static void test_anillo(void)
     CHECK(notif_store_buscar(20, &n) && n.con_detalle && strcmp(n.titulo, "Hola") == 0);
     // Modificada: vuelve al frente y conserva el detalle
     CHECK(notif_store_agregar(20, ANCS_CAT_CORREO, ANCS_FLAG_SILENCIOSA, 999));
-    CHECK(notif_store_cantidad() == 23);
+    CHECK(notif_store_cantidad() == NOTIF_MAX - 1);
     CHECK(notif_store_obtener(0, &n) && n.uid == 20 && n.con_detalle && n.categoria == ANCS_CAT_CORREO && strcmp(n.mensaje, "qué tal") == 0);
-    CHECK(notif_store_no_leidas() == 23);
-    CHECK(notif_store_marcar_leida(20) && notif_store_no_leidas() == 22);
+    CHECK(notif_store_no_leidas() == NOTIF_MAX - 1);
+    CHECK(notif_store_marcar_leida(20) && notif_store_no_leidas() == NOTIF_MAX - 2);
     notif_store_marcar_todas_leidas();
     CHECK(notif_store_no_leidas() == 0);
     notif_store_vaciar();
