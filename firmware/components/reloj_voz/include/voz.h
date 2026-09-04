@@ -19,6 +19,7 @@ void voz_reproducir_fin(void);        // no llegará más audio: tocar lo que qu
 void voz_reproducir_parar(void);      // corta ya (cancelar)
 bool voz_reproduciendo(void);
 void voz_volumen(int pct);
+void voz_ganancia_mic(float db);      // 0-37,5 dB en el ES7210
 #ifdef __cplusplus
 }
 #endif

@@ -151,6 +151,13 @@ size_t voz_reproducir_alimentar(const uint8_t *pcm, size_t n)
 void voz_reproducir_fin(void) { fin_audio = true; }
 void voz_reproducir_parar(void) { anillo_vaciar(&anillo); fin_audio = true; reproduciendo = false; tocando = false; }
 bool voz_reproduciendo(void) { return reproduciendo; }
+void voz_ganancia_mic(float db)
+{
+    if (mic) {
+        esp_codec_dev_set_in_gain(mic, db);
+    }
+}
+
 void voz_volumen(int pct)
 {
     if (alt) {

@@ -13,9 +13,11 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "bsp/esp-bsp.h"
 #include "pantalla.h"
 #include "pmic.h"
+#include "imu.h"
 #include "rtc_pcf85063.h"
 #include "boton_boot.h"
 #include "ble.h"
@@ -98,13 +100,64 @@ static void cb_cancelar_andia(void)
     andia_cancelar();
 }
 
+static void pitidos(int n);
+
+// ---- Ajustes del usuario (persisten en NVS, espacio "ajustes") ----
+static struct { int volumen, brillo, tiempo_s, sensibilidad; bool vigilia; } aj = { 60, 60, 20, 100, true };
+
+static void ajustes_cargar(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("ajustes", NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    int32_t v;
+    uint8_t b;
+    if (nvs_get_i32(h, "volumen", &v) == ESP_OK) aj.volumen = v;
+    if (nvs_get_i32(h, "brillo", &v) == ESP_OK) aj.brillo = v;
+    if (nvs_get_i32(h, "tiempo", &v) == ESP_OK) aj.tiempo_s = v;
+    if (nvs_get_i32(h, "sensib", &v) == ESP_OK) aj.sensibilidad = v;
+    if (nvs_get_u8(h, "vigilia", &b) == ESP_OK) aj.vigilia = b;
+    nvs_close(h);
+}
+
+static void ajustes_guardar(const char *clave, int valor)
+{
+    nvs_handle_t h;
+    if (nvs_open("ajustes", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_i32(h, clave, valor);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+static float ganancia_db(int pct) { return 12.0f + 25.5f * pct / 100.0f; }   // 12-37,5 dB del ES7210
+
 // "Oye Andia" siempre: el micrófono vigila en local y solo manda audio cuando hay voz cerca.
-static bool vigilia_deseada = true;
+#define vigilia_deseada (aj.vigilia)
 
 static void cb_vigilia(bool activa)
 {
-    vigilia_deseada = activa;
+    aj.vigilia = activa;
+    ajustes_guardar("vigilia", activa);
     andia_vigilia(activa);
+}
+
+static void cb_brillo(int pct) { aj.brillo = pct; ajustes_guardar("brillo", pct); pantalla_brillo(pct); }
+static void cb_volumen(int pct) { aj.volumen = pct; ajustes_guardar("volumen", pct); voz_volumen(pct); }
+static void cb_tiempo_pantalla(int s) { aj.tiempo_s = s; ajustes_guardar("tiempo", s); }
+static void cb_sensibilidad(int pct) { aj.sensibilidad = pct; ajustes_guardar("sensib", pct); voz_ganancia_mic(ganancia_db(pct)); }
+static void cb_probar_sonido(void) { pitidos(1); }
+
+static void cb_apagar(void)
+{
+    ESP_LOGI(TAG, "apagado pedido desde Configuración");
+    pmic_apagar();
+}
+
+static void refrescar_wifi_ui(void)
+{
+    ui_wifi(red_ssid(), red_ip(), red_en_casa(), andia_conectada());
 }
 
 // Onda cuadrada de `hz` durante `ms` (≤ 150) directo al anillo de reproducción.
@@ -177,6 +230,7 @@ static void evento_andia(const andia_evento_t *ev)
     case ANDIA_EV_RED:
         pantalla_lock(0);
         ui_red(ev->red_conectada, red_ip());
+        refrescar_wifi_ui();
         pantalla_unlock();
         if (ev->red_conectada && vigilia_deseada) {
             andia_vigilia(true);
@@ -335,6 +389,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
     setenv("TZ", CONFIG_RELOJ_TZ, 1);
     tzset();
+    ajustes_cargar();
     log_ram("al arrancar");
 
     cola = xQueueCreate(16, sizeof(ble_evento_t));
@@ -342,6 +397,7 @@ void app_main(void)
     notif_store_set_lock(notif_lock, notif_unlock);
     notif_store_init();
     ESP_ERROR_CHECK(pantalla_init());
+    pantalla_brillo(aj.brillo);
     log_ram("tras pantalla + LVGL");
 
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
@@ -349,6 +405,7 @@ void app_main(void)
         ESP_LOGW(TAG, "sin PMIC: no habrá batería ni botón PWR");
     }
     boton_boot_init();
+    imu_init(bus);
     struct tm t;
     if (rtc_pcf85063_init(bus) == ESP_OK && rtc_pcf85063_get(&t) == ESP_OK) {
         struct timeval tv = { .tv_sec = mktime(&t) };
@@ -362,12 +419,18 @@ void app_main(void)
     pantalla_lock(0);
     ui_init(CONFIG_RELOJ_NOMBRE_BLE, pantalla_brillo_actual());
     ui_al_olvidar(cb_olvidar);
-    ui_al_cambiar_brillo(pantalla_brillo);
+    ui_al_cambiar_brillo(cb_brillo);
     ui_al_descartar(cb_descartar);
     ui_al_llamada(cb_llamada);
     ui_al_microfono(cb_microfono);
     ui_al_cancelar_andia(cb_cancelar_andia);
     ui_al_vigilia(cb_vigilia);
+    ui_al_cambiar_volumen(cb_volumen);
+    ui_al_probar_sonido(cb_probar_sonido);
+    ui_al_cambiar_tiempo_pantalla(cb_tiempo_pantalla);
+    ui_al_cambiar_sensibilidad(cb_sensibilidad);
+    ui_al_apagar(cb_apagar);
+    ui_ajustes(aj.volumen, aj.tiempo_s, aj.sensibilidad);
     ui_vigilia(vigilia_deseada);
     pantalla_unlock();
     refrescar_bateria();
@@ -380,6 +443,8 @@ void app_main(void)
     if (voz_init() != ESP_OK) {
         ESP_LOGW(TAG, "audio no disponible");
     }
+    voz_volumen(aj.volumen);
+    voz_ganancia_mic(ganancia_db(aj.sensibilidad));
     log_ram("tras el códec de audio");
     cola_andia = xQueueCreate(6, sizeof(andia_evento_t));
     if (red_init(cola_andia) != ESP_OK) {
@@ -394,10 +459,10 @@ void app_main(void)
     pantalla_unlock();
 
     time_t ultimo_seg = 0;
-    int64_t ultimo_bat = 0;
+    int64_t ultimo_bat = 0, ultimo_wifi_ui = 0;
     ble_evento_t ev;
     while (true) {
-        if (xQueueReceive(cola, &ev, pdMS_TO_TICKS(250))) {
+        if (xQueueReceive(cola, &ev, pdMS_TO_TICKS(ui_en_sensores() ? 100 : 250))) {
             switch (ev.tipo) {
             case BLE_EV_ESTADO:
                 pantalla_lock(0);
@@ -446,6 +511,22 @@ void app_main(void)
             refrescar_bateria();
         }
 
+        // App "Sensores": mientras está abierta, leer el IMU y refrescar (el bucle espera 100 ms en vez de 250).
+        if (ui_en_sensores()) {
+            float ax, ay, az, gx, gy, gz;
+            if (imu_leer(&ax, &ay, &az, &gx, &gy, &gz)) {
+                pantalla_lock(0);
+                ui_sensores(ax, ay, az, gx, gy, gz);
+                pantalla_unlock();
+            }
+        }
+        if (ahora_ms() - ultimo_wifi_ui > 5000) {
+            ultimo_wifi_ui = ahora_ms();
+            pantalla_lock(0);
+            refrescar_wifi_ui();
+            pantalla_unlock();
+        }
+
         // Traza de calibración del táctil: coordenadas mientras hay un dedo apoyado (cada 250 ms).
         int tx, ty;
         if (pantalla_punto_tocado(&tx, &ty)) {
@@ -468,7 +549,7 @@ void app_main(void)
 
         // Pantalla: se apaga sola por inactividad y despierta con un toque.
         uint32_t sin_tocar = pantalla_ms_sin_tocar();
-        int64_t limite = (int64_t)CONFIG_RELOJ_PANTALLA_SEGUNDOS * 1000;
+        int64_t limite = (int64_t)aj.tiempo_s * 1000;
         if (pantalla_encendida()) {
             if ((int64_t)sin_tocar > limite && ahora_ms() - t_encendido_ms > limite) {
                 apagar_pantalla();
