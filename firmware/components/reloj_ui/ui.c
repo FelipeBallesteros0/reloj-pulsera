@@ -184,20 +184,20 @@ static void salir_efimera(lv_obj_t *destino, lv_screen_load_anim_t anim)
 
 // ---------------------------------------------------------------- gestos y navegación
 
-// Carátula: deslizar hacia abajo = menú de apps; hacia arriba = notificaciones.
+// Carátula: deslizar hacia arriba = menú de apps; hacia abajo = notificaciones (así lo quiere Felipe).
 static void gesto_reloj(lv_event_t *e)
 {
     lv_dir_t d = lv_indev_get_gesture_dir(lv_indev_active());
-    if (d == LV_DIR_BOTTOM) {
+    if (d == LV_DIR_TOP) {
         ui_ir_menu();
-    } else if (d == LV_DIR_TOP) {
+    } else if (d == LV_DIR_BOTTOM) {
         ui_ir_lista();
     }
 }
 
 static void gesto_menu(lv_event_t *e)
 {
-    if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+    if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
         ui_ir_reloj();
     }
 }
@@ -212,7 +212,7 @@ static void gesto_ajustes(lv_event_t *e)
 static void gesto_lista(lv_event_t *e)
 {
     lv_dir_t d = lv_indev_get_gesture_dir(lv_indev_active());
-    if (d == LV_DIR_RIGHT || d == LV_DIR_BOTTOM) {
+    if (d == LV_DIR_RIGHT || d == LV_DIR_TOP) {
         ui_ir_reloj();
     }
 }
@@ -393,7 +393,7 @@ static void crear_menu(void)
     icono_app(LV_SYMBOL_AUDIO, "ANDIA", 0x1f3a5a, 225, 90, APP_ANDIA);
     icono_app(LV_SYMBOL_GPS, "Sensores", 0x1f5a3a, 45, 280, APP_SENSORES);
     icono_app(LV_SYMBOL_PLAY, "Flappy", 0x7a5a1c, 225, 280, APP_FLAPPY);
-    lv_obj_t *pie = etiqueta(scr_menu, F16, GRIS(), "Arriba: reloj");
+    lv_obj_t *pie = etiqueta(scr_menu, F16, GRIS(), "Abajo: reloj");
     lv_obj_align(pie, LV_ALIGN_BOTTOM_MID, 0, -14);
 }
 
@@ -440,22 +440,26 @@ static void al_tocar_seccion(lv_event_t *e)
     abrir_seccion((seccion_t)(uintptr_t)lv_event_get_user_data(e));
 }
 
-static void fila_seccion(lv_obj_t *cont, const char *simbolo, const char *texto, seccion_t s)
+// Celda de la cuadrícula de Configuración: icono redondo de 130 px con el nombre debajo (como el menú de apps).
+static void icono_seccion(lv_obj_t *cont, const char *simbolo, const char *texto, uint32_t color, seccion_t s)
 {
-    lv_obj_t *b = lv_button_create(cont);
-    lv_obj_set_width(b, LV_PCT(100));
-    lv_obj_set_height(b, 60);
-    lv_obj_set_style_bg_color(b, lv_color_hex(s == SEC_APAGAR ? 0x4a1c1c : 0x1c1c1c), 0);
-    lv_obj_set_style_radius(b, 30, 0);
+    lv_obj_t *celda = lv_obj_create(cont);
+    lv_obj_set_size(celda, 165, 176);
+    lv_obj_set_style_bg_opa(celda, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(celda, 0, 0);
+    lv_obj_set_style_pad_all(celda, 0, 0);
+    lv_obj_remove_flag(celda, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *b = lv_button_create(celda);
+    lv_obj_set_size(b, 130, 130);
+    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
     lv_obj_set_style_shadow_width(b, 0, 0);
-    lv_obj_set_style_pad_hor(b, 22, 0);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_add_event_cb(b, al_tocar_seccion, LV_EVENT_CLICKED, (void *)(uintptr_t)s);
-    lv_obj_t *ic = etiqueta(b, FSIMB, AZUL(), simbolo);
-    lv_obj_align(ic, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_t *l = etiqueta(b, F20, lv_color_white(), texto);
-    lv_obj_align(l, LV_ALIGN_LEFT_MID, 34, 0);
-    lv_obj_t *fl = etiqueta(b, FSIMB, GRIS(), LV_SYMBOL_RIGHT);
-    lv_obj_align(fl, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_t *ic = etiqueta(b, FICONO, lv_color_white(), simbolo);
+    lv_obj_center(ic);
+    lv_obj_t *l = etiqueta(celda, F20, lv_color_white(), texto);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 138);
 }
 
 static void crear_ajustes(void)
@@ -470,19 +474,21 @@ static void crear_ajustes(void)
     lv_obj_align(cont, LV_ALIGN_TOP_MID, 0, 72);
     lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(cont, 0, 0);
-    lv_obj_set_style_pad_hor(cont, 26, 0);
-    lv_obj_set_style_pad_top(cont, 8, 0);
-    lv_obj_set_style_pad_bottom(cont, 60, 0);   // la última fila puede subir por encima del arco inferior
-    lv_obj_set_style_pad_row(cont, 10, 0);
-    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_hor(cont, 30, 0);
+    lv_obj_set_style_pad_top(cont, 12, 0);
+    lv_obj_set_style_pad_bottom(cont, 70, 0);   // la última fila puede subir por encima del arco inferior
+    lv_obj_set_style_pad_row(cont, 14, 0);
+    lv_obj_set_style_pad_column(cont, 20, 0);
+    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_ROW_WRAP);   // dos columnas de iconos; se desplaza hacia abajo
+    lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_scroll_dir(cont, LV_DIR_VER);
-    fila_seccion(cont, LV_SYMBOL_VOLUME_MAX, "Sonido", SEC_SONIDO);
-    fila_seccion(cont, LV_SYMBOL_IMAGE, "Pantalla", SEC_PANTALLA);
-    fila_seccion(cont, LV_SYMBOL_AUDIO, "ANDIA", SEC_ANDIA);
-    fila_seccion(cont, LV_SYMBOL_BLUETOOTH, "Bluetooth", SEC_BLUETOOTH);
-    fila_seccion(cont, LV_SYMBOL_WIFI, "WiFi", SEC_WIFI);
-    fila_seccion(cont, LV_SYMBOL_LIST, "Acerca de", SEC_ACERCA);
-    fila_seccion(cont, LV_SYMBOL_POWER, "Apagar", SEC_APAGAR);
+    icono_seccion(cont, LV_SYMBOL_VOLUME_MAX, "Sonido", 0x1f3a5a, SEC_SONIDO);
+    icono_seccion(cont, LV_SYMBOL_IMAGE, "Pantalla", 0x3a3a5a, SEC_PANTALLA);
+    icono_seccion(cont, LV_SYMBOL_AUDIO, "ANDIA", 0x1f5a3a, SEC_ANDIA);
+    icono_seccion(cont, LV_SYMBOL_BLUETOOTH, "Bluetooth", 0x1c4a7a, SEC_BLUETOOTH);
+    icono_seccion(cont, LV_SYMBOL_WIFI, "WiFi", 0x3a5a1f, SEC_WIFI);
+    icono_seccion(cont, LV_SYMBOL_LIST, "Acerca de", 0x3a3a3a, SEC_ACERCA);
+    icono_seccion(cont, LV_SYMBOL_POWER, "Apagar", 0x7a1c1c, SEC_APAGAR);
 }
 
 // ---------------------------------------------------------------- Configuración: secciones (efímeras)
@@ -1084,9 +1090,9 @@ static void refrescar_iconos(void)
 
 static void refrescar_pie(void)
 {
-    lv_label_set_text(lbl_pie, aj.vigilia ? "Di \"Oye Andia\" · abajo: apps · arriba: avisos"
-                               : ble_actual == BLE_VINCULADO ? "Abajo: apps · arriba: notificaciones"
-                               : "Sin iPhone · abajo: apps");
+    lv_label_set_text(lbl_pie, aj.vigilia ? "Di \"Oye Andia\" · arriba: apps · abajo: avisos"
+                               : ble_actual == BLE_VINCULADO ? "Arriba: apps · abajo: notificaciones"
+                               : "Sin iPhone · arriba: apps");
 }
 
 static void refrescar_acerca(void)
@@ -1340,7 +1346,7 @@ static void ir(lv_obj_t *scr, lv_screen_load_anim_t anim)
 }
 
 void ui_ir_reloj(void) { ir(scr_reloj, LV_SCR_LOAD_ANIM_FADE_IN); }
-void ui_ir_menu(void) { ir(scr_menu, LV_SCR_LOAD_ANIM_MOVE_BOTTOM); }
+void ui_ir_menu(void) { ir(scr_menu, LV_SCR_LOAD_ANIM_MOVE_TOP); }
 void ui_ir_ajustes(void) { ir(scr_ajustes, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
 void ui_ir_andia(void) { ir(scr_andia, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
 
@@ -1348,7 +1354,7 @@ void ui_ir_lista(void)
 {
     reconstruir_lista();
     lv_obj_scroll_to_y(lista_cont, 0, LV_ANIM_OFF);
-    ir(scr_lista, LV_SCR_LOAD_ANIM_MOVE_TOP);
+    ir(scr_lista, LV_SCR_LOAD_ANIM_MOVE_BOTTOM);
 }
 
 void ui_ir_detalle(uint32_t uid)
