@@ -1,5 +1,11 @@
 # ANDIA F3a — Servicio de voz en la Pi: plan de implementación
 
+> **Desvío registrado al ejecutar (2026-09-03):** Porcupine quedó fuera (cuenta de Picovoice borrada) y Vosk no sirve
+> ("Andia" no está en su vocabulario). La activación pasó a decidirse sobre la transcripción de OpenAI con pista de
+> vocabulario (`activacion.detectar_activacion`); la sesión graba la frase completa en modo gesto y `procesar_frase`
+> recibe `requiere_activacion`. Las Tasks 2, 7, 8 y 11 quedaron implementadas con esa variante; la Task 11 (Picovoice)
+> ya no aplica. El código y los tests reales están en `~/andia`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Un servicio `andia` en la Raspberry Pi (coramohost) que recibe audio por WebSocket, detecta "Oye Andia" (y variantes) con Porcupine, transcribe con OpenAI, responde con DeepSeek y herramientas, y devuelve texto más la voz de Mayuri (Fish local del PC) como PCM 16 kHz. Se prueba de punta a punta con el PC como "reloj falso" antes de tocar el firmware.
