@@ -190,6 +190,7 @@ static void procesar_mensaje(const char *json)
         publicar_texto(ANDIA_EV_PREGUNTA, txt, NULL);
     } else if (strcmp(tipo, "respuesta") == 0) {
         const cJSON *voz = cJSON_GetObjectItem(m, "voz");
+        armar_vigilante();   // también en "hablando": si el audio o el fin no llegan, no quedarse colgado
         publicar_texto(ANDIA_EV_RESPUESTA, txt, NULL);
         poner_estado(cJSON_IsTrue(voz) ? ANDIA_HABLANDO : ANDIA_PENSANDO);
     } else if (strcmp(tipo, "temporizador") == 0) {
@@ -262,6 +263,10 @@ static void alimentar_audio(const uint8_t *datos, size_t n)
 // viene en el primero y el estado del decodificador continúa en los siguientes.
 static void recibir_audio(const uint8_t *d, size_t n, size_t offset)
 {
+    if (offset == 0 && estado == ANDIA_HABLANDO) {
+        esp_timer_stop(timer_vigilante);
+        esp_timer_start_once(timer_vigilante, 15 * 1000000ULL);   // cada bloque que llega renueva el plazo
+    }
     if (!con_adpcm) {
         alimentar_audio(d, n);
         return;
@@ -454,8 +459,8 @@ static void al_capturar(const uint8_t *pcm, size_t n)
 
 static void al_vencer_vigilante(void *arg)
 {
-    if (estado != ANDIA_INACTIVA && estado != ANDIA_HABLANDO) {
-        ESP_LOGW(TAG, "ANDIA no respondió a tiempo");
+    if (estado != ANDIA_INACTIVA) {
+        ESP_LOGW(TAG, "ANDIA no respondió a tiempo (estado %d)", (int)estado);
         enviar_json("{\"t\":\"cancelar\"}");
         terminar_conversacion();
         publicar_texto(ANDIA_EV_ERROR, "ANDIA no respondió", NULL);
@@ -509,7 +514,8 @@ esp_err_t andia_init(QueueHandle_t q)
         .reconnect_timeout_ms = 5000,
         .network_timeout_ms = 8000,
         .task_stack = 5120,       // con TLS (wss://) la tarea necesita algo más de pila
-        .ping_interval_sec = 120,     // 0 sería el valor por defecto (10 s) y su PING compite con el audio por el candado
+        .ping_interval_sec = 20,      // el hotspot cambia de IP a menudo: detectar la conexión muerta en ~30 s
+        .pingpong_timeout_sec = 10,
         .disable_auto_reconnect = false,
     };
     ws = esp_websocket_client_init(&cfg);
