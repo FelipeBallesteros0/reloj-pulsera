@@ -13,7 +13,7 @@ LV_FONT_DECLARE(fuente_72);
 LV_FONT_DECLARE(emoji_20);
 
 // Copias en RAM de las fuentes de texto con la fuente de emojis como respaldo (las generadas son const, en flash).
-static lv_font_t f16, f20, f24;
+static lv_font_t f16, f20, f24, femoji;
 #define F16 (&f16)
 #define F20 (&f20)
 #define F24 (&f24)
@@ -56,10 +56,12 @@ static lv_obj_t *boton(lv_obj_t *padre, const char *texto, uint32_t color, lv_ev
 {
     lv_obj_t *b = lv_button_create(padre);
     lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
-    lv_obj_set_style_radius(b, 12, 0);
-    lv_obj_set_style_pad_hor(b, 18, 0);
-    lv_obj_set_style_pad_ver(b, 10, 0);
-    etiqueta(b, F16, lv_color_white(), texto);
+    lv_obj_set_style_radius(b, 14, 0);
+    lv_obj_set_style_pad_hor(b, 22, 0);
+    lv_obj_set_style_pad_ver(b, 12, 0);
+    lv_obj_set_style_min_height(b, 52, 0);   // objetivo táctil cómodo para el dedo
+    lv_obj_t *l = etiqueta(b, F20, lv_color_white(), texto);
+    lv_obj_center(l);
     if (cb) {
         lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     }
@@ -212,7 +214,7 @@ static void crear_ajustes(int brillo_pct)
     lv_obj_align(volver, LV_ALIGN_TOP_LEFT, 16, 12);
 
     lv_obj_t *titulo = etiqueta(scr_ajustes, F24, lv_color_white(), "Ajustes");
-    lv_obj_align(titulo, LV_ALIGN_TOP_MID, 30, 18);
+    lv_obj_align(titulo, LV_ALIGN_TOP_MID, 40, 22);
 
     lv_obj_t *l = etiqueta(scr_ajustes, F16, GRIS(), "Brillo");
     lv_obj_align(l, LV_ALIGN_TOP_LEFT, 20, 78);
@@ -258,11 +260,11 @@ static void crear_lista(void)
     lv_obj_t *volver = boton(scr_lista, LV_SYMBOL_LEFT " Reloj", 0x222222, al_pulsar_volver_reloj);
     lv_obj_align(volver, LV_ALIGN_TOP_LEFT, 12, 10);
     lv_obj_t *titulo = etiqueta(scr_lista, F24, lv_color_white(), "Notificaciones");
-    lv_obj_align(titulo, LV_ALIGN_TOP_MID, 40, 16);
+    lv_obj_align(titulo, LV_ALIGN_TOP_MID, 50, 22);
 
     lista_cont = lv_obj_create(scr_lista);
-    lv_obj_set_size(lista_cont, 410, 502 - 62);
-    lv_obj_align(lista_cont, LV_ALIGN_TOP_MID, 0, 62);
+    lv_obj_set_size(lista_cont, 410, 502 - 70);
+    lv_obj_align(lista_cont, LV_ALIGN_TOP_MID, 0, 70);
     lv_obj_set_style_bg_opa(lista_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(lista_cont, 0, 0);
     lv_obj_set_style_pad_all(lista_cont, 8, 0);
@@ -280,25 +282,26 @@ static void crear_detalle(void)
     pantalla_negra(scr_detalle);
     lv_obj_add_event_cb(scr_detalle, gesto_detalle, LV_EVENT_GESTURE, NULL);
 
-    lv_obj_t *volver = boton(scr_detalle, LV_SYMBOL_LEFT " Lista", 0x222222, al_pulsar_volver_lista);
+    lv_obj_t *volver = boton(scr_detalle, LV_SYMBOL_LEFT "  Lista", 0x222222, al_pulsar_volver_lista);
     lv_obj_align(volver, LV_ALIGN_TOP_LEFT, 12, 10);
-    lv_obj_t *descartar = boton(scr_detalle, "Descartar", 0x7a1c1c, al_pulsar_descartar);
-    lv_obj_align(descartar, LV_ALIGN_TOP_RIGHT, -12, 10);
+    lv_obj_t *descartar = boton(scr_detalle, LV_SYMBOL_TRASH "  Descartar", 0x7a1c1c, al_pulsar_descartar);
+    lv_obj_set_width(descartar, 380);
+    lv_obj_align(descartar, LV_ALIGN_BOTTOM_MID, 0, -12);
 
     det_cab = etiqueta(scr_detalle, F16, AZUL(), "");
-    lv_obj_align(det_cab, LV_ALIGN_TOP_LEFT, 20, 68);
+    lv_obj_align(det_cab, LV_ALIGN_TOP_LEFT, 20, 74);
     det_titulo = etiqueta(scr_detalle, F24, lv_color_white(), "");
     lv_obj_set_width(det_titulo, 370);
     lv_label_set_long_mode(det_titulo, LV_LABEL_LONG_MODE_WRAP);
-    lv_obj_align(det_titulo, LV_ALIGN_TOP_LEFT, 20, 94);
+    lv_obj_align(det_titulo, LV_ALIGN_TOP_LEFT, 20, 100);
     det_sub = etiqueta(scr_detalle, F16, GRIS(), "");
     lv_obj_set_width(det_sub, 370);
     lv_label_set_long_mode(det_sub, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_align_to(det_sub, det_titulo, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 6);
 
     lv_obj_t *caja = lv_obj_create(scr_detalle);
-    lv_obj_set_size(caja, 390, 502 - 200);
-    lv_obj_align(caja, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_size(caja, 390, 502 - 210 - 80);
+    lv_obj_align(caja, LV_ALIGN_TOP_MID, 0, 200);
     lv_obj_set_style_bg_opa(caja, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(caja, 0, 0);
     lv_obj_set_style_pad_all(caja, 10, 0);
@@ -359,9 +362,11 @@ static void crear_popup(void)
 
 void ui_init(const char *nombre_ble, int brillo_pct)
 {
-    f16 = fuente_16; f16.fallback = &emoji_20;
-    f20 = fuente_20; f20.fallback = &emoji_20;
-    f24 = fuente_24; f24.fallback = &emoji_20;
+    // Cadena de respaldo: texto → emojis → símbolos de LVGL (flechas, papelera, etc., que viven en Montserrat).
+    femoji = emoji_20; femoji.fallback = &lv_font_montserrat_16;
+    f16 = fuente_16; f16.fallback = &femoji;
+    f20 = fuente_20; f20.fallback = &femoji;
+    f24 = fuente_24; f24.fallback = &femoji;
     strncpy(nombre, nombre_ble, sizeof(nombre) - 1);
     crear_reloj();
     crear_ajustes(brillo_pct);
@@ -470,8 +475,8 @@ static void crear_item(const notif_t *n)
     lv_obj_set_height(b, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(b, lv_color_hex(n->leida ? 0x161616 : 0x1f2a3a), 0);
     lv_obj_set_style_radius(b, 12, 0);
-    lv_obj_set_style_pad_all(b, 10, 0);
-    lv_obj_set_style_pad_row(b, 2, 0);
+    lv_obj_set_style_pad_all(b, 12, 0);
+    lv_obj_set_style_pad_row(b, 4, 0);
     lv_obj_set_flex_flow(b, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_user_data(b, (void *)(uintptr_t)n->uid);
     lv_obj_add_event_cb(b, al_tocar_item, LV_EVENT_CLICKED, NULL);
