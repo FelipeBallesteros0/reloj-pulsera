@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <time.h>
 #include "ble.h"
+#include "andia.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,6 +29,15 @@ void ui_notifs_refrescar(void);            // relee el almacén: contador, lista
 void ui_aviso(uint32_t uid);               // tarjeta emergente 6 s (toca para abrir)
 void ui_llamada(uint32_t uid, bool mostrar);
 bool ui_en_llamada(uint32_t *uid);
+
+// ANDIA
+void ui_andia_estado(andia_estado_t e);
+void ui_andia_pregunta(const char *t);
+void ui_andia_respuesta(const char *t);
+void ui_andia_error(const char *t);
+void ui_ir_andia(void);
+void ui_al_microfono(ui_cb_t cb);          // botón de micrófono (carátula y pantalla ANDIA)
+void ui_al_cancelar_andia(ui_cb_t cb);
 
 // Navegación
 void ui_ir_reloj(void);

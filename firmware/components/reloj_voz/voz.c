@@ -21,26 +21,22 @@ esp_err_t voz_init(void)
     alt = bsp_audio_codec_speaker_init();
     mic = bsp_audio_codec_microphone_init();
     ESP_RETURN_ON_FALSE(alt && mic, ESP_FAIL, TAG, "no se pudo iniciar el códec");
-    // Como el ejemplo de Waveshare: 16 kHz, 16 bit, 2 canales en el bus (dos micrófonos); la app trabaja en mono.
-    esp_codec_dev_sample_info_t fs = { .bits_per_sample = 16, .channel = 2, .sample_rate = VOZ_TASA };
+    // 16 kHz, 16 bit, MONO en el bus: la mitad de DMA que el ejemplo de Waveshare (que usa los dos micrófonos).
+    esp_codec_dev_sample_info_t fs = { .bits_per_sample = 16, .channel = 1, .sample_rate = VOZ_TASA };
     ESP_RETURN_ON_FALSE(esp_codec_dev_open(alt, &fs) == 0, ESP_FAIL, TAG, "abrir altavoz");
     ESP_RETURN_ON_FALSE(esp_codec_dev_open(mic, &fs) == 0, ESP_FAIL, TAG, "abrir micrófono");
     esp_codec_dev_set_in_gain(mic, 24.0f);
     esp_codec_dev_set_out_vol(alt, 60);
     anillo_init(&anillo, mem_anillo, sizeof(mem_anillo));
-    ESP_LOGI(TAG, "códec listo (16 kHz; estéreo en el bus, mono en la app)");
+    ESP_LOGI(TAG, "códec listo (16 kHz mono)");
     return ESP_OK;
 }
 
 static void tarea_captura(void *p)
 {
-    static int16_t estereo[512 * 2];
     static int16_t mono[512];
     while (capturando) {
-        if (esp_codec_dev_read(mic, estereo, sizeof(estereo)) == 0) {
-            for (int i = 0; i < 512; i++) {
-                mono[i] = estereo[2 * i];       // canal izquierdo
-            }
+        if (esp_codec_dev_read(mic, mono, sizeof(mono)) == 0) {
             if (cb_captura && capturando) {
                 cb_captura((const uint8_t *)mono, sizeof(mono));
             }
@@ -67,7 +63,6 @@ bool voz_capturando(void) { return capturando; }
 static void tarea_reproduccion(void *p)
 {
     static int16_t mono[256];
-    static int16_t estereo[256 * 2];
     // Espera la reserva (o el fin, si la respuesta es más corta) antes de empezar a tocar.
     while (reproduciendo && anillo_ocupado(&anillo) < RESERVA && !fin_audio) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -81,11 +76,7 @@ static void tarea_reproduccion(void *p)
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
-        size_t muestras = n / 2;
-        for (size_t i = 0; i < muestras; i++) {
-            estereo[2 * i] = estereo[2 * i + 1] = mono[i];
-        }
-        esp_codec_dev_write(alt, estereo, muestras * 4);
+        esp_codec_dev_write(alt, mono, n);
     }
     reproduciendo = false;
     vTaskDelete(NULL);

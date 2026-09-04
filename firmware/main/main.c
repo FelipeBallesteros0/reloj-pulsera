@@ -120,6 +120,133 @@ static void cb_llamada(uint32_t uid, bool contestar)
     ancs_accion(uid, contestar);
 }
 
+// ---- ANDIA: conversación, avisos como notificaciones y temporizador local ----
+static uint32_t uid_local = 0xA0000000;
+static esp_timer_handle_t timer_andia;
+
+static void cb_microfono(void)
+{
+    encender_pantalla();
+    esp_err_t r = andia_conversar(false);
+    if (r == ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "ANDIA ya está en una conversación");
+    }
+}
+
+static void cb_cancelar_andia(void)
+{
+    andia_cancelar();
+}
+
+static void pitidos(int n)
+{
+    // Tono de 880 Hz, 120 ms, repetido n veces con pausas; va directo al anillo de reproducción.
+    static int16_t tono[VOZ_TASA * 120 / 1000];
+    static int16_t silencio[VOZ_TASA * 100 / 1000];
+    for (size_t i = 0; i < sizeof(tono) / 2; i++) {
+        tono[i] = (int16_t)(9000 * ((i / 9) % 2 ? 1 : -1));   // onda cuadrada ~880 Hz (16000/18)
+    }
+    for (int k = 0; k < n; k++) {
+        voz_reproducir_alimentar((uint8_t *)tono, sizeof(tono));
+        voz_reproducir_alimentar((uint8_t *)silencio, sizeof(silencio));
+    }
+    voz_reproducir_fin();
+}
+
+static void aviso_local(const char *titulo, const char *mensaje, const char *origen)
+{
+    uint32_t uid = uid_local++;
+    notif_store_agregar(uid, ANCS_CAT_OTRA, 0, (uint32_t)(esp_timer_get_time() / 1000));
+    ancs_attrs_t at = { .uid = uid };
+    snprintf(at.app_id, sizeof(at.app_id), "cl.reloj.andia");
+    snprintf(at.titulo, sizeof(at.titulo), "%s", titulo);
+    snprintf(at.mensaje, sizeof(at.mensaje), "%s", mensaje);
+    time_t ahora = time(NULL);
+    struct tm tt;
+    localtime_r(&ahora, &tt);
+    strftime(at.fecha, sizeof(at.fecha), "%Y%m%dT%H%M%S", &tt);
+    notif_store_poner_detalle(uid, &at);
+    encender_pantalla();
+    pantalla_lock(0);
+    ui_notifs_refrescar();
+    ui_aviso(uid);
+    pantalla_unlock();
+    ESP_LOGI(TAG, "aviso (%s): %s", origen, mensaje);
+}
+
+static void al_vencer_temporizador(void *arg)
+{
+    andia_evento_t ev = { .tipo = ANDIA_EV_AVISO };
+    snprintf(ev.texto, sizeof(ev.texto), "Se acabó el tiempo");
+    snprintf(ev.origen, sizeof(ev.origen), "temporizador");
+    xQueueSend(cola_andia, &ev, 0);
+}
+
+static void evento_andia(const andia_evento_t *ev)
+{
+    switch (ev->tipo) {
+    case ANDIA_EV_RED:
+        pantalla_lock(0);
+        ui_red(ev->red_conectada, red_ip());
+        pantalla_unlock();
+        break;
+    case ANDIA_EV_ESTADO:
+        if (ev->estado != ANDIA_INACTIVA) {
+            encender_pantalla();
+        }
+        pantalla_lock(0);
+        ui_andia_estado(ev->estado);
+        pantalla_unlock();
+        break;
+    case ANDIA_EV_PREGUNTA:
+        pantalla_lock(0);
+        ui_andia_pregunta(ev->texto);
+        pantalla_unlock();
+        break;
+    case ANDIA_EV_RESPUESTA:
+        encender_pantalla();
+        pantalla_lock(0);
+        ui_andia_respuesta(ev->texto);
+        pantalla_unlock();
+        break;
+    case ANDIA_EV_FIN:
+        pantalla_lock(0);
+        ui_andia_estado(ANDIA_INACTIVA);
+        if (strcmp(ev->texto, "sin_activacion") == 0) {
+            ui_andia_error("No escuché mi nombre.");
+        } else if (strcmp(ev->texto, "sin_voz") == 0) {
+            ui_andia_error("No escuché nada.");
+        }
+        pantalla_unlock();
+        break;
+    case ANDIA_EV_ERROR:
+        encender_pantalla();
+        pantalla_lock(0);
+        ui_andia_estado(ANDIA_INACTIVA);
+        ui_andia_error(ev->texto);
+        pantalla_unlock();
+        break;
+    case ANDIA_EV_AVISO:
+        if (strcmp(ev->origen, "temporizador") == 0) {
+            pitidos(3);
+            aviso_local("Temporizador", ev->texto, ev->origen);
+        } else {
+            pitidos(1);
+            aviso_local(strcmp(ev->origen, "recordatorio") == 0 ? "Recordatorio" : "ANDIA", ev->texto, ev->origen);
+        }
+        break;
+    case ANDIA_EV_TEMPORIZADOR:
+        if (!timer_andia) {
+            const esp_timer_create_args_t a = { .callback = al_vencer_temporizador, .name = "temporizador" };
+            esp_timer_create(&a, &timer_andia);
+        }
+        esp_timer_stop(timer_andia);
+        esp_timer_start_once(timer_andia, (uint64_t)ev->segundos * 1000000ULL);
+        ESP_LOGI(TAG, "temporizador de %d s", ev->segundos);
+        break;
+    }
+}
+
 static void refrescar_notifs(void)
 {
     pantalla_lock(0);
@@ -238,6 +365,8 @@ void app_main(void)
     ui_al_cambiar_brillo(pantalla_brillo);
     ui_al_descartar(cb_descartar);
     ui_al_llamada(cb_llamada);
+    ui_al_microfono(cb_microfono);
+    ui_al_cancelar_andia(cb_cancelar_andia);
     pantalla_unlock();
     refrescar_bateria();
     log_ram("con la UI creada");
@@ -250,9 +379,12 @@ void app_main(void)
         ESP_LOGW(TAG, "audio no disponible");
     }
     log_ram("tras el códec de audio");
-    cola_andia = xQueueCreate(16, sizeof(andia_evento_t));
+    cola_andia = xQueueCreate(6, sizeof(andia_evento_t));
     if (red_init(cola_andia) != ESP_OK) {
         ESP_LOGW(TAG, "WiFi no arrancó");
+    }
+    if (andia_init(cola_andia) != ESP_OK) {
+        ESP_LOGW(TAG, "cliente ANDIA no disponible");
     }
     log_ram("tras arrancar WiFi");
     pantalla_lock(0);
@@ -286,11 +418,7 @@ void app_main(void)
         // Eventos de ANDIA / red (sin bloquear).
         andia_evento_t ea;
         while (cola_andia && xQueueReceive(cola_andia, &ea, 0)) {
-            if (ea.tipo == ANDIA_EV_RED) {
-                pantalla_lock(0);
-                ui_red(ea.red_conectada, red_ip());
-                pantalla_unlock();
-            }
+            evento_andia(&ea);
         }
 
         // Botón PWR (llega por el PMIC) y eventos de USB/carga.

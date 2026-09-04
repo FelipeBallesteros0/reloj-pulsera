@@ -22,7 +22,9 @@ static const char *DIAS[] = { "domingo", "lunes", "martes", "miércoles", "jueve
 static const char *MESES[] = { "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
                                "septiembre", "octubre", "noviembre", "diciembre" };
 
-static lv_obj_t *scr_reloj, *scr_ajustes, *scr_lista, *scr_detalle, *scr_llamada;
+static lv_obj_t *scr_reloj, *scr_ajustes, *scr_lista, *scr_detalle, *scr_llamada, *scr_andia;
+static lv_obj_t *and_estado, *and_pregunta, *and_respuesta, *and_boton, *and_boton_lbl, *btn_mic;
+static andia_estado_t and_est = ANDIA_INACTIVA;
 static lv_obj_t *lbl_iconos, *lbl_hora, *lbl_fecha, *lbl_notifs, *lbl_pie;
 static lv_obj_t *lbl_ble_estado, *lbl_ble_dir, *lbl_ble_bond, *lbl_acerca, *slider_brillo;
 static lv_obj_t *lista_cont, *lbl_lista_vacia;
@@ -34,7 +36,7 @@ static uint32_t uid_detalle, uid_popup, uid_llamada;
 static bool hay_llamada;
 static lv_obj_t *scr_antes_llamada;
 
-static ui_cb_t cb_olvidar;
+static ui_cb_t cb_olvidar, cb_microfono, cb_cancelar_andia;
 static ui_cb_int_t cb_brillo;
 static ui_cb_uid_t cb_descartar;
 static ui_cb_llamada_t cb_llamada;
@@ -123,6 +125,32 @@ static void gesto_detalle(lv_event_t *e)
 }
 
 static void al_pulsar_volver_reloj(lv_event_t *e) { ui_ir_reloj(); }
+
+static void gesto_andia(lv_event_t *e)
+{
+    if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+        ui_ir_reloj();
+    }
+}
+
+static void al_pulsar_microfono(lv_event_t *e)
+{
+    ui_ir_andia();
+    if (cb_microfono) {
+        cb_microfono();
+    }
+}
+
+static void al_pulsar_boton_andia(lv_event_t *e)
+{
+    if (and_est == ANDIA_INACTIVA) {
+        if (cb_microfono) {
+            cb_microfono();
+        }
+    } else if (cb_cancelar_andia) {
+        cb_cancelar_andia();
+    }
+}
 static void al_pulsar_volver_lista(lv_event_t *e) { ui_ir_lista(); }
 
 static lv_obj_t *btn_olvidar_lbl;
@@ -222,6 +250,52 @@ static void crear_reloj(void)
 
     lbl_pie = etiqueta(scr_reloj, F16, GRIS(), "Abajo: notificaciones · arriba: ajustes");
     lv_obj_align(lbl_pie, LV_ALIGN_BOTTOM_MID, 0, -24);
+
+    // Botón de micrófono: abre la pantalla ANDIA y empieza a escuchar.
+    btn_mic = lv_button_create(scr_reloj);
+    lv_obj_set_size(btn_mic, 72, 72);
+    lv_obj_set_style_radius(btn_mic, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(btn_mic, lv_color_hex(0x1f3a5a), 0);
+    lv_obj_align(btn_mic, LV_ALIGN_BOTTOM_MID, 0, -64);
+    lv_obj_t *ic = etiqueta(btn_mic, &lv_font_montserrat_16, lv_color_white(), LV_SYMBOL_AUDIO);
+    lv_obj_center(ic);
+    lv_obj_add_event_cb(btn_mic, al_pulsar_microfono, LV_EVENT_CLICKED, NULL);
+}
+
+static void crear_andia(void)
+{
+    scr_andia = lv_obj_create(NULL);
+    pantalla_negra(scr_andia);
+    lv_obj_add_event_cb(scr_andia, gesto_andia, LV_EVENT_GESTURE, NULL);
+
+    lv_obj_t *volver = boton(scr_andia, LV_SYMBOL_LEFT "  Reloj", 0x222222, al_pulsar_volver_reloj);
+    lv_obj_align(volver, LV_ALIGN_TOP_LEFT, 12, 10);
+    lv_obj_t *titulo = etiqueta(scr_andia, F24, lv_color_white(), "ANDIA");
+    lv_obj_align(titulo, LV_ALIGN_TOP_MID, 50, 22);
+
+    and_estado = etiqueta(scr_andia, F16, AZUL(), "Lista");
+    lv_obj_align(and_estado, LV_ALIGN_TOP_MID, 0, 74);
+
+    and_pregunta = etiqueta(scr_andia, F16, GRIS(), "");
+    lv_obj_set_width(and_pregunta, 370);
+    lv_label_set_long_mode(and_pregunta, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_align(and_pregunta, LV_ALIGN_TOP_LEFT, 20, 104);
+
+    lv_obj_t *caja = lv_obj_create(scr_andia);
+    lv_obj_set_size(caja, 390, 502 - 170 - 90);
+    lv_obj_align(caja, LV_ALIGN_TOP_MID, 0, 170);
+    lv_obj_set_style_bg_opa(caja, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(caja, 0, 0);
+    lv_obj_set_style_pad_all(caja, 10, 0);
+    lv_obj_set_scroll_dir(caja, LV_DIR_VER);
+    and_respuesta = etiqueta(caja, F20, lv_color_white(), "Toca el botón y habla.");
+    lv_obj_set_width(and_respuesta, 370);
+    lv_label_set_long_mode(and_respuesta, LV_LABEL_LONG_MODE_WRAP);
+
+    and_boton = boton(scr_andia, LV_SYMBOL_AUDIO "  Hablar", 0x1f3a5a, al_pulsar_boton_andia);
+    lv_obj_set_width(and_boton, 380);
+    lv_obj_align(and_boton, LV_ALIGN_BOTTOM_MID, 0, -12);
+    and_boton_lbl = lv_obj_get_child(and_boton, 0);
 }
 
 static void crear_ajustes(int brillo_pct)
@@ -395,6 +469,7 @@ void ui_init(const char *nombre_ble, int brillo_pct)
     crear_lista();
     crear_detalle();
     crear_llamada();
+    crear_andia();
     crear_popup();
     ui_ram(0);
     lv_screen_load(scr_reloj);
@@ -625,6 +700,34 @@ bool ui_en_llamada(uint32_t *uid)
     }
     return true;
 }
+
+// ---------------------------------------------------------------- ANDIA
+
+void ui_andia_estado(andia_estado_t e)
+{
+    and_est = e;
+    static const char *TXT[] = { "Lista", "Conectando…", "Escuchando…", "Te escucho", "Pensando…", "Hablando" };
+    lv_label_set_text(and_estado, TXT[e < 6 ? e : 0]);
+    lv_obj_set_style_text_color(and_estado, e == ANDIA_INACTIVA ? GRIS() : AZUL(), 0);
+    if (e == ANDIA_INACTIVA) {
+        lv_label_set_text(and_boton_lbl, LV_SYMBOL_AUDIO "  Hablar");
+        lv_obj_set_style_bg_color(and_boton, lv_color_hex(0x1f3a5a), 0);
+    } else {
+        lv_label_set_text(and_boton_lbl, LV_SYMBOL_CLOSE "  Cancelar");
+        lv_obj_set_style_bg_color(and_boton, lv_color_hex(0x7a1c1c), 0);
+    }
+    if (e == ANDIA_ESCUCHANDO || e == ANDIA_ACTIVADA) {
+        lv_label_set_text(and_pregunta, "");
+        lv_label_set_text(and_respuesta, "");
+    }
+}
+
+void ui_andia_pregunta(const char *t) { lv_label_set_text(and_pregunta, t); }
+void ui_andia_respuesta(const char *t) { lv_label_set_text(and_respuesta, t); lv_obj_set_style_text_color(and_respuesta, lv_color_white(), 0); }
+void ui_andia_error(const char *t) { lv_label_set_text(and_respuesta, t); lv_obj_set_style_text_color(and_respuesta, lv_palette_main(LV_PALETTE_ORANGE), 0); }
+void ui_ir_andia(void) { lv_screen_load_anim(scr_andia, LV_SCR_LOAD_ANIM_MOVE_LEFT, 150, 0, false); }
+void ui_al_microfono(ui_cb_t cb) { cb_microfono = cb; }
+void ui_al_cancelar_andia(ui_cb_t cb) { cb_cancelar_andia = cb; }
 
 // ---------------------------------------------------------------- navegación y callbacks
 

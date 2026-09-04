@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 static const struct { const char *id; const char *nombre; } TABLA[] = {
+    { "cl.reloj.andia", "ANDIA" },
     { "net.whatsapp.WhatsApp", "WhatsApp" },
     { "com.apple.MobileSMS", "Mensajes" },
     { "com.apple.mobilephone", "Teléfono" },
