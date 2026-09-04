@@ -1,7 +1,7 @@
 menu "Reloj: ANDIA"
     config RELOJ_ANDIA_URL
         string "URL del WebSocket de ANDIA"
-        default "ws://192.168.x.x:8001/ws"
+        default "wss://andia.example.com/ws"
     config RELOJ_ANDIA_TOKEN
         string "Token compartido con el servicio ANDIA"
         default ""

@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 #include "esp_mac.h"
 #include "esp_websocket_client.h"
+#include "esp_crt_bundle.h"
 #include "cJSON.h"
 #include "voz.h"
 #include "red.h"
@@ -222,10 +223,11 @@ esp_err_t andia_init(QueueHandle_t q)
         .uri = CONFIG_RELOJ_ANDIA_URL,
         .buffer_size = 1536,      // los mensajes grandes (audio de 3200 B) llegan fragmentados y se manejan
         .reconnect_timeout_ms = 5000,
-        .network_timeout_ms = 5000,
-        .task_stack = 4096,
+        .network_timeout_ms = 8000,
+        .task_stack = 5120,       // con TLS (wss://) la tarea necesita algo más de pila
         .ping_interval_sec = 0,
         .disable_auto_reconnect = false,
+        .crt_bundle_attach = esp_crt_bundle_attach,   // raíces de confianza para wss:// (Cloudflare usa GTS)
     };
     ws = esp_websocket_client_init(&cfg);
     ESP_RETURN_ON_FALSE(ws, ESP_FAIL, TAG, "no se pudo crear el cliente");
