@@ -456,7 +456,7 @@ static void detectar_voz(const int16_t *pcm, size_t muestras)
 // ADPCM (4 veces menos datos: con -80 dBm el PCM llegaba a trompicones).
 static const char *bajada_para_ahora(void)
 {
-    bajada_adpcm = !(cliente_lan && red_rssi() > -70);
+    bajada_adpcm = !(cliente_lan && red_rssi() > -60);   // con -63 dBm el PCM (32 KB/s) ya se quedaba sin datos
     return bajada_adpcm ? "adpcm" : "pcm";
 }
 
