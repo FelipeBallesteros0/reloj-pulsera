@@ -35,7 +35,7 @@ static struct { int tramas, mensajes, fallidas, descartadas; int64_t total_us, m
 // juntando los que haya pendientes (hasta 7 = 224 ms) en un solo mensaje.
 #define BLOQUE_BYTES   (ADPCM_CABECERA + VOZ_TRAMA_BYTES / 4)   // 260 B = 32 ms
 #define COLA_BLOQUES   12
-#define BLOQUES_POR_MENSAJE 7
+#define BLOQUES_POR_MENSAJE 5      // 1300 B: cabe en el búfer del cliente sin fragmentar
 static uint8_t cola_audio[COLA_BLOQUES][BLOQUE_BYTES];
 static volatile uint8_t cola_in, cola_out;
 static TaskHandle_t tarea_envio;
@@ -373,7 +373,7 @@ esp_err_t andia_init(QueueHandle_t q)
         // Con transporte externo el cliente no deduce el puerto del esquema (intentaba host:0).
         .port = strncmp(CONFIG_RELOJ_ANDIA_URL, "wss://", 6) == 0 ? 443 : 80,
         .ext_transport = transporte,
-        .buffer_size = 2048,      // caben enteros un bloque de bajada (1604 B) y un mensaje de subida (1820 B)
+        .buffer_size = 1536,      // un bloque de bajada (1604 B) llega en dos trozos y se maneja; la subida cabe entera
         .reconnect_timeout_ms = 5000,
         .network_timeout_ms = 8000,
         .task_stack = 5120,       // con TLS (wss://) la tarea necesita algo más de pila
