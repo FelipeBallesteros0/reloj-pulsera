@@ -3,6 +3,9 @@
 > **Estado 2026-09-03:** F0, F1 y F2 completas y verificadas en hardware con el iPhone. Desvíos respecto del plan:
 > iOS ya no lista periféricos genéricos en Ajustes (emparejamiento inicial vía nRF Connect); flasheo/consola desde
 > Windows por atascos de usbip; gestos con la convención del teléfono; fuente de emojis Noto como respaldo.
+> **F3a (servicio ANDIA en la Pi) completa el 2026-09-03 23:30**: repo `~/andia` (main), servicio `andia` en
+> coramohost:8001, probado con el PC como reloj falso (voz Mayuri, activación "Oye Andia" sobre el texto, temporizador,
+> recordatorio → aviso). Sigue **F3b**: cliente de audio en el reloj (WiFi + WebSocket + mic/altavoz).
 
 ## Contexto
 
