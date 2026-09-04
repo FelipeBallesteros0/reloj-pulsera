@@ -1065,7 +1065,9 @@ def test_responder_guarda_historial_y_lo_reenvia(tmp_path):
     ultimo = recibidos[-1]
     assert ultimo[0]["role"] == "system"
     # max_turnos=2 → como mucho 2 turnos previos (4 mensajes) + el actual
-    assert [m["content"] for m in ultimo if m["role"] == "user"] == ["¿qué hora es?", "tercera"]
+    assert [m["content"] for m in ultimo if m["role"] == "user"] == ["hola", "¿qué hora es?", "tercera"]
+    c.responder("cuarta")
+    assert [m["content"] for m in recibidos[-1] if m["role"] == "user"] == ["¿qué hora es?", "tercera", "cuarta"]
     # persiste en disco y se recarga
     c2 = cerebro.Cerebro(pedir, lambda n, a: "", tmp_path / "h.json", ahora=AHORA, max_turnos=2)
     assert len(c2.historial) == 4
