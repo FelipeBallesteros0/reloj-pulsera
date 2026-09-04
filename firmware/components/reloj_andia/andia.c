@@ -1,5 +1,6 @@
 #include "andia.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -9,6 +10,7 @@
 #include <math.h>
 #include "esp_websocket_client.h"
 #include "esp_transport_ssl.h"
+#include "esp_transport_tcp.h"
 #include "esp_transport_ws.h"
 #include "esp_crt_bundle.h"
 #include "lwip/sockets.h"
@@ -21,7 +23,8 @@
 static const char *TAG = "andia";
 static QueueHandle_t cola;
 static esp_websocket_client_handle_t ws;
-static esp_transport_handle_t transporte;   // ws sobre TLS, creado aquí para llegar al socket (TCP_NODELAY)
+static esp_transport_handle_t transporte, transporte_base;   // ws sobre TLS o TCP; propios para llegar al socket
+static bool cliente_lan;                    // el cliente actual va por la LAN de casa (ws://) o por el túnel (wss://)
 static volatile andia_estado_t estado = ANDIA_INACTIVA;
 static volatile bool saludado;            // el servidor aceptó el "hola"
 static char acum[1024];                   // mensajes de texto que llegan fragmentados
@@ -503,24 +506,41 @@ static const char *ruta_de_url(const char *url)
     return p ? p : "/";
 }
 
-esp_err_t andia_init(QueueHandle_t q)
+// "ws://host:8001/ws" → 8001; sin puerto explícito, el del esquema.
+static int puerto_de_url(const char *url, int defecto)
 {
-    cola = q;
-    uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_BT);
-    snprintf(id_reloj, sizeof(id_reloj), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    // Transporte propio (TLS + WebSocket) en vez del que crearía el cliente: así tenemos el socket a mano.
-    esp_transport_handle_t tls = esp_transport_ssl_init();
-    ESP_RETURN_ON_FALSE(tls, ESP_ERR_NO_MEM, TAG, "transporte TLS");
-    esp_transport_ssl_crt_bundle_attach(tls, esp_crt_bundle_attach);   // raíces de confianza (Cloudflare usa GTS)
-    transporte = esp_transport_ws_init(tls);
+    const char *p = strstr(url, "://");
+    if (!p) {
+        return defecto;
+    }
+    p += 3;
+    const char *barra = strchr(p, '/');
+    const char *dp = strchr(p, ':');
+    if (dp && (!barra || dp < barra)) {
+        return atoi(dp + 1);
+    }
+    return defecto;
+}
+
+// Cliente WebSocket para la red actual: en casa, ws:// directo a la Pi por la LAN (sin TLS: ~25 KB de RAM menos
+// y sin los cortes del túnel); fuera, wss:// por Cloudflare. Transporte propio para llegar al socket (TCP_NODELAY).
+static esp_err_t crear_cliente(bool lan)
+{
+    const char *url = lan ? CONFIG_RELOJ_ANDIA_URL_CASA : CONFIG_RELOJ_ANDIA_URL;
+    bool tls = strncmp(url, "wss://", 6) == 0;
+    transporte_base = tls ? esp_transport_ssl_init() : esp_transport_tcp_init();
+    ESP_RETURN_ON_FALSE(transporte_base, ESP_ERR_NO_MEM, TAG, "transporte base");
+    if (tls) {
+        esp_transport_ssl_crt_bundle_attach(transporte_base, esp_crt_bundle_attach);   // raíces (Cloudflare usa GTS)
+    }
+    transporte = esp_transport_ws_init(transporte_base);
     ESP_RETURN_ON_FALSE(transporte, ESP_ERR_NO_MEM, TAG, "transporte WS");
-    const esp_transport_ws_config_t cfg_ws = { .ws_path = ruta_de_url(CONFIG_RELOJ_ANDIA_URL), .propagate_control_frames = true };
+    const esp_transport_ws_config_t cfg_ws = { .ws_path = ruta_de_url(url), .propagate_control_frames = true };
     ESP_RETURN_ON_ERROR(esp_transport_ws_set_config(transporte, &cfg_ws), TAG, "config WS");
     esp_websocket_client_config_t cfg = {
-        .uri = CONFIG_RELOJ_ANDIA_URL,
+        .uri = url,
         // Con transporte externo el cliente no deduce el puerto del esquema (intentaba host:0).
-        .port = strncmp(CONFIG_RELOJ_ANDIA_URL, "wss://", 6) == 0 ? 443 : 80,
+        .port = puerto_de_url(url, tls ? 443 : 80),
         .ext_transport = transporte,
         .buffer_size = 1024,      // un bloque de bajada (1604 B) llega en dos trozos y se maneja; la subida cabe entera
         .reconnect_timeout_ms = 5000,
@@ -533,6 +553,44 @@ esp_err_t andia_init(QueueHandle_t q)
     ws = esp_websocket_client_init(&cfg);
     ESP_RETURN_ON_FALSE(ws, ESP_FAIL, TAG, "no se pudo crear el cliente");
     ESP_RETURN_ON_ERROR(esp_websocket_register_events(ws, WEBSOCKET_EVENT_ANY, al_evento_ws, NULL), TAG, "eventos");
+    cliente_lan = lan;
+    ESP_LOGI(TAG, "cliente ANDIA por %s: %s", lan ? "la LAN de casa" : "el túnel", url);
+    return ESP_OK;
+}
+
+static void destruir_cliente(void)
+{
+    if (!ws) {
+        return;
+    }
+    saludado = false;
+    esp_websocket_client_destroy(ws);        // para la tarea y cierra si estaba conectado
+    ws = NULL;
+    esp_transport_destroy(transporte);
+    esp_transport_destroy(transporte_base);
+    transporte = transporte_base = NULL;
+}
+
+// El cliente debe corresponder a la red actual; si cambió (casa ↔ hotspot), se recrea. Solo desde la tarea de la app.
+static esp_err_t asegurar_cliente(void)
+{
+    bool lan = red_en_casa();
+    if (ws && cliente_lan == lan) {
+        return ESP_OK;
+    }
+    if (ws) {
+        ESP_LOGI(TAG, "cambió la red: recreo el cliente");
+        destruir_cliente();
+    }
+    return crear_cliente(lan);
+}
+
+esp_err_t andia_init(QueueHandle_t q)
+{
+    cola = q;
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_BT);
+    snprintf(id_reloj, sizeof(id_reloj), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     const esp_timer_create_args_t a1 = { .callback = al_vencer_vigilante, .name = "andia_vig" };
     const esp_timer_create_args_t a2 = { .callback = al_ping, .name = "andia_ping" };
     const esp_timer_create_args_t a3 = { .callback = al_reanudar_envio, .name = "andia_sigue" };
@@ -549,6 +607,10 @@ static bool asegurar_conexion(void)
 {
     if (!red_conectada()) {
         publicar_texto(ANDIA_EV_ERROR, "Sin WiFi", NULL);
+        return false;
+    }
+    if (asegurar_cliente() != ESP_OK) {
+        publicar_texto(ANDIA_EV_ERROR, "Sin cliente ANDIA", NULL);
         return false;
     }
     if (!esp_websocket_client_is_connected(ws)) {
@@ -605,7 +667,7 @@ void andia_vigilia(bool activa)
     vigilia = activa;
     ESP_LOGI(TAG, "vigilia %s", activa ? "activada" : "desactivada");
     if (activa) {
-        if (red_conectada() && ws && !esp_websocket_client_is_connected(ws)) {
+        if (red_conectada() && asegurar_cliente() == ESP_OK && !esp_websocket_client_is_connected(ws)) {
             esp_websocket_client_start(ws);   // conexión permanente: el "Oye" no puede esperar al TLS
         }
         if (!voz_capturando()) {

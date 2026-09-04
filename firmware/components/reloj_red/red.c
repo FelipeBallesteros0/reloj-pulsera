@@ -110,6 +110,7 @@ esp_err_t red_init(QueueHandle_t cola_eventos)
 bool red_conectada(void) { return conectada; }
 const char *red_ip(void) { return ip; }
 const char *red_ssid(void) { return ssid_actual; }
+bool red_en_casa(void) { return red_conectada() && strcmp(ssid_actual, CONFIG_RELOJ_WIFI1_SSID) == 0; }
 
 void red_ahorro(bool activo)
 {
