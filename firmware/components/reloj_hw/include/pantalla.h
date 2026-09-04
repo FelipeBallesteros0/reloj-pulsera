@@ -20,6 +20,7 @@ void pantalla_encender(void);
 void pantalla_apagar(void);             // brillo 0 + comando "display off"; LVGL sigue vivo para detectar el toque
 bool pantalla_encendida(void);
 uint32_t pantalla_ms_sin_tocar(void);   // milisegundos desde el último toque
+bool pantalla_punto_tocado(int *x, int *y);   // true (y coordenadas) si hay un dedo apoyado ahora
 
 #ifdef __cplusplus
 }

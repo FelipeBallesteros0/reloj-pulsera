@@ -11,6 +11,18 @@
 #include "sdkconfig.h"
 
 static const char *TAG = "pantalla";
+
+// Los bool de Kconfig solo existen como macro cuando están en "y".
+#ifdef CONFIG_RELOJ_TACTIL_ESPEJO_Y
+#define ESPEJO_Y true
+#else
+#define ESPEJO_Y false
+#endif
+#ifdef CONFIG_RELOJ_TACTIL_ESPEJO_X
+#define ESPEJO_X true
+#else
+#define ESPEJO_X false
+#endif
 static esp_lcd_panel_handle_t panel;
 static esp_lcd_panel_io_handle_t io;
 static esp_lcd_touch_handle_t tp;
@@ -63,6 +75,9 @@ esp_err_t pantalla_init(void)
     lv_display_add_event_cb(disp, redondear_area, LV_EVENT_INVALIDATE_AREA, NULL);
 
     ESP_RETURN_ON_ERROR(bsp_touch_new(NULL, &tp), TAG, "táctil");
+    // El FT3168 entrega Y espejado respecto del panel en esta placa (el BSP lo deja sin espejo).
+    esp_lcd_touch_set_mirror_y(tp, ESPEJO_Y);
+    esp_lcd_touch_set_mirror_x(tp, ESPEJO_X);
     const lvgl_port_touch_cfg_t tcfg = { .disp = disp, .handle = tp };
     indev = lvgl_port_add_touch(&tcfg);
     ESP_RETURN_ON_FALSE(indev, ESP_FAIL, TAG, "lvgl_port_add_touch");
@@ -110,3 +125,15 @@ void pantalla_encender(void)
 
 bool pantalla_encendida(void) { return encendida; }
 uint32_t pantalla_ms_sin_tocar(void) { return disp ? lv_display_get_inactive_time(disp) : 0; }
+
+bool pantalla_punto_tocado(int *x, int *y)
+{
+    if (!indev || lv_indev_get_state(indev) != LV_INDEV_STATE_PRESSED) {
+        return false;
+    }
+    lv_point_t p;
+    lv_indev_get_point(indev, &p);
+    *x = p.x;
+    *y = p.y;
+    return true;
+}

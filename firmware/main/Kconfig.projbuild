@@ -9,6 +9,16 @@ menu "Reloj"
         default 20
         range 5 600
 
+    config RELOJ_TACTIL_ESPEJO_Y
+        bool "Espejar el eje Y del táctil"
+        default y
+        help
+            En esta placa el FT3168 entrega Y invertido respecto del panel: sin espejo los gestos salen al revés.
+
+    config RELOJ_TACTIL_ESPEJO_X
+        bool "Espejar el eje X del táctil"
+        default n
+
     config RELOJ_TZ
         string "Zona horaria (formato POSIX TZ)"
         default "<-04>4<-03>,M9.1.6/24,M4.1.6/24"

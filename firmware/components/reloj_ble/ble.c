@@ -101,14 +101,15 @@ static int gap_evento(struct ble_gap_event *ev, void *arg)
         if (ev->connect.status == 0) {
             conn_handle = ev->connect.conn_handle;
             ESP_LOGI(TAG, "conectado (handle %d)", conn_handle);
-            publicar_estado(BLE_CONECTADO);
             ble_gattc_exchange_mtu(conn_handle, NULL, NULL);
             struct ble_gap_conn_desc d;
             if (ble_gap_conn_find(conn_handle, &d) == 0 && d.sec_state.encrypted) {
-                // El iPhone ya cifró con el bond antes de que llegáramos aquí: no pedir nada (una petición de
-                // seguridad ignorada vence a los 30 s y NimBLE la reporta como fallo de cifrado).
+                // El iPhone ya cifró con el bond antes de que llegáramos aquí (ENC_CHANGE llegó primero): no pedir
+                // nada (una petición de seguridad ignorada vence a los 30 s) y no degradar el estado "vinculado".
                 ESP_LOGI(TAG, "el enlace ya venía cifrado");
+                publicar_estado(BLE_VINCULADO);
             } else {
+                publicar_estado(BLE_CONECTADO);
                 int rc = ble_gap_security_initiate(conn_handle);   // pide cifrado + bonding → llega ENC_CHANGE
                 if (rc) {
                     ESP_LOGW(TAG, "security_initiate rc=%d", rc);
