@@ -11,6 +11,7 @@
 #include "sdkconfig.h"
 
 static const char *TAG = "red";
+static void aplicar_ahorro(void);
 static QueueHandle_t cola;
 static bool conectada;
 static char ip[16] = "--";
@@ -80,7 +81,7 @@ static void al_evento(void *arg, esp_event_base_t base, int32_t id, void *datos)
         snprintf(ip, sizeof(ip), IPSTR, IP2STR(&e->ip_info.ip));
         fallos = 0;
         ESP_LOGI(TAG, "conectado a \"%s\", IP %s", ssid_actual, ip);
-        esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+        aplicar_ahorro();
         publicar(true);
     }
 }
@@ -112,7 +113,30 @@ const char *red_ip(void) { return ip; }
 const char *red_ssid(void) { return ssid_actual; }
 bool red_en_casa(void) { return red_conectada() && strcmp(ssid_actual, CONFIG_RELOJ_WIFI1_SSID) == 0; }
 
+static bool ahorro_permitido = true, ahorro_pedido = true;
+
+static void aplicar_ahorro(void)
+{
+    esp_wifi_set_ps(ahorro_permitido && ahorro_pedido ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+}
+
 void red_ahorro(bool activo)
 {
-    esp_wifi_set_ps(activo ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+    ahorro_pedido = activo;
+    aplicar_ahorro();
+}
+
+void red_permitir_ahorro(bool permitir)
+{
+    if (ahorro_permitido != permitir) {
+        ESP_LOGI(TAG, "ahorro de energía del WiFi %s", permitir ? "permitido (a batería)" : "desactivado (con USB)");
+    }
+    ahorro_permitido = permitir;
+    aplicar_ahorro();
+}
+
+int red_rssi(void)
+{
+    wifi_ap_record_t ap;
+    return (red_conectada() && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ? ap.rssi : 0;
 }

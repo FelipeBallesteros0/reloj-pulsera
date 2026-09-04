@@ -26,7 +26,7 @@ void ui_bateria(int pct, bool cargando, bool usb);
 void ui_ble(ble_estado_t estado, bool tiene_bond, const char *direccion);
 void ui_ram(unsigned kb);
 void ui_red(bool conectada, const char *ip);
-void ui_wifi(const char *ssid, const char *ip, bool en_casa, bool andia_conectada);   // sección WiFi
+void ui_wifi(const char *ssid, const char *ip, bool en_casa, bool andia_conectada, int rssi);   // sección WiFi
 
 // Notificaciones
 void ui_notifs_refrescar(void);            // relee el almacén: contador, lista y detalle abierto

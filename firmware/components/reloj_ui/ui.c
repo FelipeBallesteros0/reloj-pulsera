@@ -72,6 +72,7 @@ static struct {
     bool ble_vinculado;
     char wifi_ssid[40], wifi_ip[20];
     bool wifi_ok, en_casa, andia_ok;
+    int rssi;
     unsigned ram_kb;
 } aj = { 60, 20, 100, 60, true, "Anunciando…", "Dirección: --", "Emparejamiento guardado: no", false, "--", "--",
          false, false, false, 0 };
@@ -596,7 +597,7 @@ static void pintar_wifi(void)
     char b[64];
     snprintf(b, sizeof(b), "Red: %s", aj.wifi_ok ? aj.wifi_ssid : "sin conexión");
     lv_label_set_text(sub_wifi[0], b);
-    snprintf(b, sizeof(b), "IP: %s", aj.wifi_ok ? aj.wifi_ip : "--");
+    snprintf(b, sizeof(b), "IP: %s · señal %d dBm", aj.wifi_ok ? aj.wifi_ip : "--", aj.rssi);
     lv_label_set_text(sub_wifi[1], b);
     lv_label_set_text(sub_wifi[2], !aj.wifi_ok ? "ANDIA: sin red" : aj.en_casa ? "ANDIA por la LAN de casa (sin TLS)"
                                                                                : "ANDIA por el túnel de Cloudflare (TLS)");
@@ -1113,8 +1114,9 @@ void ui_red(bool conectada, const char *ip)
     pintar_wifi();
 }
 
-void ui_wifi(const char *ssid, const char *ip, bool en_casa, bool andia_conectada)
+void ui_wifi(const char *ssid, const char *ip, bool en_casa, bool andia_conectada, int rssi)
 {
+    aj.rssi = rssi;
     snprintf(aj.wifi_ssid, sizeof(aj.wifi_ssid), "%s", ssid ? ssid : "--");
     snprintf(aj.wifi_ip, sizeof(aj.wifi_ip), "%s", ip ? ip : "--");
     aj.en_casa = en_casa;

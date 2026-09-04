@@ -157,7 +157,7 @@ static void cb_apagar(void)
 
 static void refrescar_wifi_ui(void)
 {
-    ui_wifi(red_ssid(), red_ip(), red_en_casa(), andia_conectada());
+    ui_wifi(red_ssid(), red_ip(), red_en_casa(), andia_conectada(), red_rssi());
 }
 
 // Onda cuadrada de `hz` durante `ms` (≤ 150) directo al anillo de reproducción.
@@ -363,10 +363,11 @@ static void refrescar_bateria(void)
     ui_bateria(pmic_bateria_pct(), pmic_cargando(), pmic_usb_conectado());
     ui_ram((unsigned)(esp_get_free_heap_size() / 1024));
     pantalla_unlock();
-    ESP_LOGI(TAG, "latido: RAM libre %u B (bloque mayor %u B), batería %d %% (%d mV), USB %s, BLE %d, pantalla %s",
+    ESP_LOGI(TAG, "latido: RAM libre %u B (bloque mayor %u B), batería %d %% (%d mV), USB %s, BLE %d, pantalla %s, WiFi %d dBm",
              (unsigned)esp_get_free_heap_size(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
              pmic_bateria_pct(), pmic_bateria_mv(),
-             pmic_usb_conectado() ? "sí" : "no", (int)ble_estado(), pantalla_encendida() ? "on" : "off");
+             pmic_usb_conectado() ? "sí" : "no", (int)ble_estado(), pantalla_encendida() ? "on" : "off", red_rssi());
+    red_permitir_ahorro(!pmic_usb_conectado());
     ESP_LOGI(TAG, "notificaciones: %d guardadas, %d sin leer, ANCS %s; WiFi %s (%s)", notif_store_cantidad(),
              notif_store_no_leidas(), ancs_listo() ? "suscrito" : "no", red_conectada() ? red_ssid() : "sin red", red_ip());
 }
@@ -501,6 +502,7 @@ void app_main(void)
         }
         if (pe.usb_puesto || pe.usb_quitado || pe.carga_inicio || pe.carga_fin) {
             refrescar_bateria();
+            red_permitir_ahorro(!pmic_usb_conectado());
         }
 
         // App "Sensores": mientras está abierta, leer el IMU y refrescar (el bucle espera 100 ms en vez de 250).
