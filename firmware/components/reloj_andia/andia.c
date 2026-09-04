@@ -407,7 +407,7 @@ static bool asegurar_conexion(void)
             esp_websocket_client_start(ws);
         }
     }
-    for (int i = 0; i < 60 && !saludado; i++) {   // hasta 6 s
+    for (int i = 0; i < 120 && !saludado; i++) {  // hasta 12 s: por el hotspot el TLS a veces tarda o reintenta
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     if (!saludado) {
