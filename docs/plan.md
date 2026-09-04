@@ -8,7 +8,12 @@
 > recordatorio → aviso). **F3b** (cliente de audio en el reloj: `reloj_red`, `reloj_voz`, `reloj_andia`) y **F3e**
 > (túnel `wss://andia.example.com/ws` por Cloudflare, TLS 1.2, audio IMA ADPCM 4:1 en ambos sentidos) implementados
 > el 2026-09-04 y **verificados en el reloj físico por el hotspot** (hora, clima, temporizador, aviso empujado desde el
-> PC). Subida de audio: cola de bloques + tarea de envío, TCP_NODELAY y ventanas TCP de 5760 B (ver `docs/ram.md`).
+> PC). Subida de audio: cola de bloques + tarea de envío, TCP_NODELAY y ventanas TCP (ver `docs/ram.md`).
+> **Vigilia "Oye Andia" siempre** (2026-09-04 07:30): el micrófono captura en local y un detector de energía abre
+> una sesión en modo gesto con 640 ms de audio previo; la Pi confirma el nombre (activación textual), "sigue" si
+> solo se dijo el nombre, límite de transcripciones por ventana. Verificado sin tocar el reloj. Sustituye al gesto de
+> muñeca previsto en F3c (queda como opción de ahorro para F4). Riesgo abierto: el hotspot cambia de IP celular y
+> corta la conexión; en casa convendría `ws://` por LAN sin TLS (pendiente el WiFi de la casa).
 
 ## Contexto
 
