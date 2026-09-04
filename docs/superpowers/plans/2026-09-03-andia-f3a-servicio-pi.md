@@ -701,7 +701,7 @@ git add -A && git commit -q -m "TTS: Fish (Mayuri) a PCM 16 kHz con cliente inye
 ```bash
 cp /mnt/c/Users/Felipe/Desktop/bot_whatsapp/recordatorios.py ~/andia/andia/recordatorios.py
 cp /mnt/c/Users/Felipe/Desktop/bot_whatsapp/tests/test_recordatorios.py ~/andia/pruebas/test_recordatorios.py
-sed -i 's/^import recordatorios$/from andia import recordatorios/; s/^from recordatorios import/from andia.recordatorios import/' ~/andia/pruebas/test_recordatorios.py
+sed -i 's/^import recordatorios as rec$/from andia import recordatorios as rec/; /^sys\.path\.insert/d' ~/andia/pruebas/test_recordatorios.py
 pytest -q pruebas/test_recordatorios.py
 ```
 Expected: todos pasan (si algún import del test original difiere, ajustar solo la línea de import).
@@ -751,7 +751,7 @@ def test_temporizador_rechaza_valores_raros():
 def test_ejecutar_nunca_lanza(tmp_path):
     recordatorios.usar(recordatorios.Agenda(tmp_path / "r.json"))
     assert "no existe" in herramientas.ejecutar("nada", {})
-    assert "falló" in herramientas.ejecutar("borrar_recordatorio", {"id": "x"})
+    assert "falló" in herramientas.ejecutar("crear_recordatorio", {"mensaje": ""})   # ValueError dentro → texto, no excepción
     assert "Programado" in herramientas.ejecutar("crear_recordatorio", '{"mensaje": "pan", "en_minutos": 5}')
 ```
 
