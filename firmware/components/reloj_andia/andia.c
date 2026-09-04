@@ -108,11 +108,13 @@ static void enviar_json(const char *json)
 }
 
 // Plazo sin noticias de la Pi: se reinicia con cada mensaje suyo (STT + LLM + TTS pueden sumar 15 s).
-static void armar_vigilante(void)
+static void armar_vigilante_s(int segundos)
 {
     esp_timer_stop(timer_vigilante);
-    esp_timer_start_once(timer_vigilante, 30 * 1000000ULL);
+    esp_timer_start_once(timer_vigilante, (uint64_t)segundos * 1000000ULL);
 }
+
+static void armar_vigilante(void) { armar_vigilante_s(30); }
 
 static void informar_envio(void)
 {
@@ -176,7 +178,7 @@ static void procesar_mensaje(const char *json)
         }
         poner_estado(ANDIA_ACTIVADA);
     } else if (strcmp(tipo, "pensando") == 0) {
-        armar_vigilante();
+        armar_vigilante_s(45);   // STT + modelo + Fish (sin streaming) pueden sumar más de 30 s
         enviando = false;
         if (!vigilia) {
             voz_capturar_detener();
