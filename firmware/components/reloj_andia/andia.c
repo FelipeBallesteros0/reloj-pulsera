@@ -37,6 +37,8 @@ static void poner_estado(andia_estado_t e)
     if (estado == e) {
         return;
     }
+    static const char *N[] = { "inactiva", "conectando", "escuchando", "activada", "pensando", "hablando" };
+    ESP_LOGI(TAG, "estado: %s → %s", N[estado], N[e]);
     estado = e;
     andia_evento_t ev = { .tipo = ANDIA_EV_ESTADO, .estado = e };
     publicar(&ev);
@@ -190,7 +192,10 @@ static void al_evento_ws(void *arg, esp_event_base_t base, int32_t id, void *dat
 static void al_capturar(const uint8_t *pcm, size_t n)
 {
     if (ws && esp_websocket_client_is_connected(ws)) {
-        esp_websocket_client_send_bin(ws, (const char *)pcm, n, pdMS_TO_TICKS(200));
+        int r = esp_websocket_client_send_bin(ws, (const char *)pcm, n, pdMS_TO_TICKS(500));
+        if (r < 0) {
+            ESP_LOGW(TAG, "trama de audio no enviada");
+        }
     }
 }
 

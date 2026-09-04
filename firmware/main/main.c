@@ -64,48 +64,6 @@ static void cb_olvidar(void)
     ble_olvidar();
 }
 
-// ---- Prueba de eco (F3b, temporal): PWR largo graba 1 s del micrófono y lo reproduce por el altavoz ----
-static uint8_t *eco_buf;
-static volatile size_t eco_len;
-static volatile uint32_t eco_energia;
-
-static void eco_capturar(const uint8_t *pcm, size_t n)
-{
-    if (!eco_buf || eco_len + n > VOZ_TASA * 2) {
-        voz_capturar_detener();
-        return;
-    }
-    const int16_t *m = (const int16_t *)pcm;
-    for (size_t i = 0; i < n / 2; i++) {
-        eco_energia += (uint32_t)(m[i] < 0 ? -m[i] : m[i]);
-    }
-    memcpy(eco_buf + eco_len, pcm, n);
-    eco_len += n;
-}
-
-static void eco_prueba(void)
-{
-    if (!eco_buf) {
-        eco_buf = malloc(VOZ_TASA * 2);
-        if (!eco_buf) {
-            ESP_LOGW(TAG, "eco: sin RAM para 1 s de audio");
-            return;
-        }
-    }
-    eco_len = 0;
-    eco_energia = 0;
-    ESP_LOGI(TAG, "eco: grabando 1 s… habla");
-    voz_capturar_iniciar(eco_capturar);
-    while (voz_capturando()) {
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    ESP_LOGI(TAG, "eco: %u bytes, nivel medio %u; reproduciendo", (unsigned)eco_len, (unsigned)(eco_energia / (eco_len / 2 + 1)));
-    voz_reproducir_alimentar(eco_buf, eco_len);
-    voz_reproducir_fin();
-    free(eco_buf);
-    eco_buf = NULL;
-}
-
 // Desde la UI (tarea LVGL): "Descartar" quita la notificación también en el iPhone.
 static void cb_descartar(uint32_t uid)
 {
@@ -435,8 +393,10 @@ void app_main(void)
             }
         }
         if (pe.pwr_largo) {
-            encender_pantalla();
-            eco_prueba();   // F3b: prueba de micrófono/altavoz (temporal; después PWR largo = hablar con ANDIA)
+            pantalla_lock(0);
+            ui_ir_andia();
+            pantalla_unlock();
+            cb_microfono();
         }
         if (pe.usb_puesto || pe.usb_quitado || pe.carga_inicio || pe.carga_fin) {
             refrescar_bateria();
