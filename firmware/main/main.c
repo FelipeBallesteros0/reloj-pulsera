@@ -1,6 +1,8 @@
 // Tarea principal del reloj: arranque del hardware, cola de eventos BLE, sondeo del PMIC y control de la pantalla.
 // Es la única tarea que toca LVGL (siempre bajo pantalla_lock).
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
@@ -21,10 +23,14 @@
 #include "ancs_proto.h"
 #include "notif_store.h"
 #include "ui.h"
+#include "red.h"
+#include "andia.h"
+#include "voz.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "reloj";
 static QueueHandle_t cola;
+static QueueHandle_t cola_andia;
 static int64_t t_apagado_ms;
 static int64_t t_encendido_ms;      // último encendido por evento (notificación, botón): cuenta como actividad
 static SemaphoreHandle_t mtx_notif;
@@ -56,6 +62,48 @@ static void aplicar_hora(const struct tm *t)
 static void cb_olvidar(void)
 {
     ble_olvidar();
+}
+
+// ---- Prueba de eco (F3b, temporal): PWR largo graba 1 s del micrófono y lo reproduce por el altavoz ----
+static uint8_t *eco_buf;
+static volatile size_t eco_len;
+static volatile uint32_t eco_energia;
+
+static void eco_capturar(const uint8_t *pcm, size_t n)
+{
+    if (!eco_buf || eco_len + n > VOZ_TASA * 2) {
+        voz_capturar_detener();
+        return;
+    }
+    const int16_t *m = (const int16_t *)pcm;
+    for (size_t i = 0; i < n / 2; i++) {
+        eco_energia += (uint32_t)(m[i] < 0 ? -m[i] : m[i]);
+    }
+    memcpy(eco_buf + eco_len, pcm, n);
+    eco_len += n;
+}
+
+static void eco_prueba(void)
+{
+    if (!eco_buf) {
+        eco_buf = malloc(VOZ_TASA * 2);
+        if (!eco_buf) {
+            ESP_LOGW(TAG, "eco: sin RAM para 1 s de audio");
+            return;
+        }
+    }
+    eco_len = 0;
+    eco_energia = 0;
+    ESP_LOGI(TAG, "eco: grabando 1 s… habla");
+    voz_capturar_iniciar(eco_capturar);
+    while (voz_capturando()) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    ESP_LOGI(TAG, "eco: %u bytes, nivel medio %u; reproduciendo", (unsigned)eco_len, (unsigned)(eco_energia / (eco_len / 2 + 1)));
+    voz_reproducir_alimentar(eco_buf, eco_len);
+    voz_reproducir_fin();
+    free(eco_buf);
+    eco_buf = NULL;
 }
 
 // Desde la UI (tarea LVGL): "Descartar" quita la notificación también en el iPhone.
@@ -146,8 +194,8 @@ static void refrescar_bateria(void)
     ESP_LOGI(TAG, "latido: RAM libre %u B, batería %d %% (%d mV), USB %s, BLE %d, pantalla %s",
              (unsigned)esp_get_free_heap_size(), pmic_bateria_pct(), pmic_bateria_mv(),
              pmic_usb_conectado() ? "sí" : "no", (int)ble_estado(), pantalla_encendida() ? "on" : "off");
-    ESP_LOGI(TAG, "notificaciones: %d guardadas, %d sin leer, ANCS %s", notif_store_cantidad(), notif_store_no_leidas(),
-             ancs_listo() ? "suscrito" : "no");
+    ESP_LOGI(TAG, "notificaciones: %d guardadas, %d sin leer, ANCS %s; WiFi %s (%s)", notif_store_cantidad(),
+             notif_store_no_leidas(), ancs_listo() ? "suscrito" : "no", red_conectada() ? red_ssid() : "sin red", red_ip());
 }
 
 void app_main(void)
@@ -197,6 +245,16 @@ void app_main(void)
     ESP_ERROR_CHECK(ble_init(CONFIG_RELOJ_NOMBRE_BLE, cola));
     vTaskDelay(pdMS_TO_TICKS(300));
     log_ram("tras NimBLE");
+
+    if (voz_init() != ESP_OK) {
+        ESP_LOGW(TAG, "audio no disponible");
+    }
+    log_ram("tras el códec de audio");
+    cola_andia = xQueueCreate(16, sizeof(andia_evento_t));
+    if (red_init(cola_andia) != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi no arrancó");
+    }
+    log_ram("tras arrancar WiFi");
     pantalla_lock(0);
     ui_ble(ble_estado(), ble_tiene_bond(), ble_direccion());
     pantalla_unlock();
@@ -225,6 +283,16 @@ void app_main(void)
             }
         }
 
+        // Eventos de ANDIA / red (sin bloquear).
+        andia_evento_t ea;
+        while (cola_andia && xQueueReceive(cola_andia, &ea, 0)) {
+            if (ea.tipo == ANDIA_EV_RED) {
+                pantalla_lock(0);
+                ui_red(ea.red_conectada, red_ip());
+                pantalla_unlock();
+            }
+        }
+
         // Botón PWR (llega por el PMIC) y eventos de USB/carga.
         pmic_eventos_t pe;
         pmic_sondear(&pe);
@@ -240,9 +308,7 @@ void app_main(void)
         }
         if (pe.pwr_largo) {
             encender_pantalla();
-            pantalla_lock(0);
-            ui_ir_ajustes();
-            pantalla_unlock();
+            eco_prueba();   // F3b: prueba de micrófono/altavoz (temporal; después PWR largo = hablar con ANDIA)
         }
         if (pe.usb_puesto || pe.usb_quitado || pe.carga_inicio || pe.carga_fin) {
             refrescar_bateria();

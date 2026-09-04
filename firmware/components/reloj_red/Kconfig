@@ -1,0 +1,16 @@
+menu "Reloj: WiFi"
+    config RELOJ_WIFI1_SSID
+        string "Red 1 (casa): SSID"
+        default ""
+    config RELOJ_WIFI1_CLAVE
+        string "Red 1 (casa): clave"
+        default ""
+    config RELOJ_WIFI2_SSID
+        string "Red 2 (hotspot): SSID"
+        default "Felipe "
+        help
+            El hotspot del iPhone de Felipe se llama "Felipe " con un espacio al final (se compara byte a byte).
+    config RELOJ_WIFI2_CLAVE
+        string "Red 2 (hotspot): clave"
+        default ""
+endmenu

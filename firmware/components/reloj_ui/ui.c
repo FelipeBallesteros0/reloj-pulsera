@@ -423,16 +423,29 @@ static const char *icono_bateria(int pct)
 
 static ble_estado_t ble_actual = BLE_ANUNCIANDO;
 static int bat_pct = -1;
-static bool bat_cargando, bat_usb;
+static bool bat_cargando, bat_usb, red_ok;
+static char red_ip_txt[16] = "--";
+static unsigned ram_kb;
 
 static void refrescar_iconos(void)
 {
-    char buf[48];
-    snprintf(buf, sizeof(buf), "%s%s  %s %s%d%%", LV_SYMBOL_BLUETOOTH, ble_actual == BLE_VINCULADO ? "" : "?",
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%s%s  %s%s  %s %s%d%%", LV_SYMBOL_BLUETOOTH, ble_actual == BLE_VINCULADO ? "" : "?",
+             LV_SYMBOL_WIFI, red_ok ? "" : "?",
              icono_bateria(bat_pct), bat_cargando ? LV_SYMBOL_CHARGE " " : (bat_usb ? LV_SYMBOL_USB " " : ""),
              bat_pct < 0 ? 0 : bat_pct);
     lv_label_set_text(lbl_iconos, buf);
-    lv_obj_set_style_text_color(lbl_iconos, ble_actual == BLE_VINCULADO ? AZUL() : GRIS(), 0);
+    lv_obj_set_style_text_color(lbl_iconos, (ble_actual == BLE_VINCULADO || red_ok) ? AZUL() : GRIS(), 0);
+}
+
+void ui_red(bool conectada, const char *ip)
+{
+    red_ok = conectada;
+    snprintf(red_ip_txt, sizeof(red_ip_txt), "%s", ip ? ip : "--");
+    refrescar_iconos();
+    char buf[96];
+    snprintf(buf, sizeof(buf), "Versión %s · RAM libre %u KB · WiFi %s", esp_app_get_description()->version, ram_kb, red_ip_txt);
+    lv_label_set_text(lbl_acerca, buf);
 }
 
 void ui_bateria(int pct, bool cargando, bool usb)
@@ -462,8 +475,9 @@ void ui_ble(ble_estado_t estado, bool tiene_bond, const char *direccion)
 
 void ui_ram(unsigned kb)
 {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Versión %s · RAM libre %u KB", esp_app_get_description()->version, kb);
+    ram_kb = kb;
+    char buf[96];
+    snprintf(buf, sizeof(buf), "Versión %s · RAM libre %u KB · WiFi %s", esp_app_get_description()->version, kb, red_ip_txt);
     lv_label_set_text(lbl_acerca, buf);
 }
 
