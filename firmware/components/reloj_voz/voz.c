@@ -28,7 +28,7 @@ esp_err_t voz_init(void)
     esp_codec_dev_sample_info_t fs = { .bits_per_sample = 16, .channel = 1, .sample_rate = VOZ_TASA };
     ESP_RETURN_ON_FALSE(esp_codec_dev_open(alt, &fs) == 0, ESP_FAIL, TAG, "abrir altavoz");
     ESP_RETURN_ON_FALSE(esp_codec_dev_open(mic, &fs) == 0, ESP_FAIL, TAG, "abrir micrófono");
-    esp_codec_dev_set_in_gain(mic, 24.0f);
+    esp_codec_dev_set_in_gain(mic, 36.0f);   // con 24 dB la voz llegaba a -28 dBFS
     esp_codec_dev_set_out_vol(alt, 60);
     anillo_init(&anillo, mem_anillo, sizeof(mem_anillo));
     // Una sola tarea permanente para captura y reproducción (nunca ocurren a la vez): así no hay que reservar

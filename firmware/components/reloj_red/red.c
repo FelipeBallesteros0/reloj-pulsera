@@ -110,3 +110,8 @@ esp_err_t red_init(QueueHandle_t cola_eventos)
 bool red_conectada(void) { return conectada; }
 const char *red_ip(void) { return ip; }
 const char *red_ssid(void) { return ssid_actual; }
+
+void red_ahorro(bool activo)
+{
+    esp_wifi_set_ps(activo ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+}

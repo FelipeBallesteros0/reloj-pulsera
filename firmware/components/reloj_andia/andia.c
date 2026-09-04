@@ -7,7 +7,10 @@
 #include "esp_timer.h"
 #include "esp_mac.h"
 #include "esp_websocket_client.h"
+#include "esp_transport_ssl.h"
+#include "esp_transport_ws.h"
 #include "esp_crt_bundle.h"
+#include "lwip/sockets.h"
 #include "cJSON.h"
 #include "voz.h"
 #include "adpcm.h"
@@ -17,6 +20,7 @@
 static const char *TAG = "andia";
 static QueueHandle_t cola;
 static esp_websocket_client_handle_t ws;
+static esp_transport_handle_t transporte;   // ws sobre TLS, creado aquí para llegar al socket (TCP_NODELAY)
 static volatile andia_estado_t estado = ANDIA_INACTIVA;
 static volatile bool saludado;            // el servidor aceptó el "hola"
 static char acum[1024];                   // mensajes de texto que llegan fragmentados
@@ -76,8 +80,16 @@ static void enviar_json(const char *json)
     }
 }
 
+// Plazo sin noticias de la Pi: se reinicia con cada mensaje suyo (STT + LLM + TTS pueden sumar 15 s).
+static void armar_vigilante(void)
+{
+    esp_timer_stop(timer_vigilante);
+    esp_timer_start_once(timer_vigilante, 30 * 1000000ULL);
+}
+
 static void terminar_conversacion(void)
 {
+    red_ahorro(true);
     if (envio.tramas) {
         ESP_LOGI(TAG, "audio: %d tramas enviadas, %d fallidas, envío máx %d ms", envio.tramas, envio.fallidas,
                  (int)(envio.max_us / 1000));
@@ -107,11 +119,14 @@ static void procesar_mensaje(const char *json)
         saludado = true;
         ESP_LOGI(TAG, "servidor listo (audio %s)", con_adpcm ? "adpcm" : "pcm");
     } else if (strcmp(tipo, "activada") == 0) {
+        armar_vigilante();
         poner_estado(ANDIA_ACTIVADA);
     } else if (strcmp(tipo, "pensando") == 0) {
+        armar_vigilante();
         voz_capturar_detener();
         poner_estado(ANDIA_PENSANDO);
     } else if (strcmp(tipo, "pregunta") == 0) {
+        armar_vigilante();
         publicar_texto(ANDIA_EV_PREGUNTA, txt, NULL);
     } else if (strcmp(tipo, "respuesta") == 0) {
         const cJSON *voz = cJSON_GetObjectItem(m, "voz");
@@ -126,6 +141,7 @@ static void procesar_mensaje(const char *json)
         voz_reproducir_fin();
         voz_capturar_detener();
         esp_timer_stop(timer_vigilante);
+        red_ahorro(true);
         publicar_texto(ANDIA_EV_FIN, cJSON_IsString(motivo) ? motivo->valuestring : "", NULL);
         poner_estado(ANDIA_INACTIVA);
     } else if (strcmp(tipo, "error") == 0) {
@@ -182,6 +198,13 @@ static void al_evento_ws(void *arg, esp_event_base_t base, int32_t id, void *dat
     esp_websocket_event_data_t *e = datos;
     switch (id) {
     case WEBSOCKET_EVENT_CONNECTED: {
+        // Sin Nagle: el cliente escribe cabecera y carga por separado y, con Nagle, la carga esperaba el ACK de la
+        // cabecera (un viaje completo por trama de audio: 12 s para subir 2 s de voz por el hotspot).
+        int fd = esp_transport_get_socket(transporte);
+        int uno = 1;
+        if (fd < 0 || setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &uno, sizeof(uno)) != 0) {
+            ESP_LOGW(TAG, "no pude quitar Nagle al socket %d", fd);
+        }
         char hola[160];
         snprintf(hola, sizeof(hola), "{\"t\":\"hola\",\"token\":\"%s\",\"reloj\":\"%s\",\"v\":1,\"audio\":\"adpcm\"}",
                  CONFIG_RELOJ_ANDIA_TOKEN, id_reloj);
@@ -277,21 +300,37 @@ static void al_ping(void *arg)
 
 // ---------------------------------------------------------------- API
 
+// "wss://host/ws" → "/ws" (el cliente solo usa la URL para el host y el puerto; la ruta la lleva el transporte).
+static const char *ruta_de_url(const char *url)
+{
+    const char *p = strstr(url, "://");
+    p = p ? strchr(p + 3, '/') : NULL;
+    return p ? p : "/";
+}
+
 esp_err_t andia_init(QueueHandle_t q)
 {
     cola = q;
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_BT);
     snprintf(id_reloj, sizeof(id_reloj), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    // Transporte propio (TLS + WebSocket) en vez del que crearía el cliente: así tenemos el socket a mano.
+    esp_transport_handle_t tls = esp_transport_ssl_init();
+    ESP_RETURN_ON_FALSE(tls, ESP_ERR_NO_MEM, TAG, "transporte TLS");
+    esp_transport_ssl_crt_bundle_attach(tls, esp_crt_bundle_attach);   // raíces de confianza (Cloudflare usa GTS)
+    transporte = esp_transport_ws_init(tls);
+    ESP_RETURN_ON_FALSE(transporte, ESP_ERR_NO_MEM, TAG, "transporte WS");
+    const esp_transport_ws_config_t cfg_ws = { .ws_path = ruta_de_url(CONFIG_RELOJ_ANDIA_URL), .propagate_control_frames = true };
+    ESP_RETURN_ON_ERROR(esp_transport_ws_set_config(transporte, &cfg_ws), TAG, "config WS");
     esp_websocket_client_config_t cfg = {
         .uri = CONFIG_RELOJ_ANDIA_URL,
-        .buffer_size = 1536,      // los mensajes grandes (audio de 3200 B) llegan fragmentados y se manejan
+        .ext_transport = transporte,
+        .buffer_size = 1536,      // los bloques de audio (1604 B) pueden llegar en dos fragmentos y se manejan
         .reconnect_timeout_ms = 5000,
         .network_timeout_ms = 8000,
         .task_stack = 5120,       // con TLS (wss://) la tarea necesita algo más de pila
         .ping_interval_sec = 0,
         .disable_auto_reconnect = false,
-        .crt_bundle_attach = esp_crt_bundle_attach,   // raíces de confianza para wss:// (Cloudflare usa GTS)
     };
     ws = esp_websocket_client_init(&cfg);
     ESP_RETURN_ON_FALSE(ws, ESP_FAIL, TAG, "no se pudo crear el cliente");
@@ -335,15 +374,16 @@ esp_err_t andia_conversar(bool gesto)
         return ESP_ERR_INVALID_STATE;
     }
     voz_reproducir_parar();
+    red_ahorro(false);
     if (!asegurar_conexion()) {
+        red_ahorro(true);
         return ESP_FAIL;
     }
     enviar_json(gesto ? "{\"t\":\"inicio\",\"modo\":\"gesto\"}" : "{\"t\":\"inicio\",\"modo\":\"boton\"}");
     codificador = (adpcm_estado_t){ 0 };
     memset(&envio, 0, sizeof(envio));
     poner_estado(ANDIA_ESCUCHANDO);
-    esp_timer_stop(timer_vigilante);
-    esp_timer_start_once(timer_vigilante, 25 * 1000000ULL);
+    armar_vigilante();
     esp_err_t r = voz_capturar_iniciar(al_capturar);
     if (r != ESP_OK) {
         enviar_json("{\"t\":\"cancelar\"}");

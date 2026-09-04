@@ -11,6 +11,7 @@ esp_err_t red_init(QueueHandle_t cola_eventos);   // publica andia_evento_t {AND
 bool red_conectada(void);
 const char *red_ip(void);      // "192.168.x.x" o "--"
 const char *red_ssid(void);    // red actual o "--"
+void red_ahorro(bool activo);  // false durante una conversación (latencia), true en reposo
 #ifdef __cplusplus
 }
 #endif
