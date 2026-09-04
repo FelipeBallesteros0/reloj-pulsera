@@ -18,6 +18,20 @@ static lv_font_t f16, f20, f24, femoji;
 #define F20 (&f20)
 #define F24 (&f24)
 
+// La pantalla tiene las esquinas redondeadas con un radio de ~120 px (medido: el arco de 100 se corta, el de 120
+// no). Regla: un punto (x, y) cerca de una esquina se ve si dista menos de ESQ_R del centro del arco, que está a
+// (ESQ_R, ESQ_R) de esa esquina. De ahí salen estos márgenes; los botones son píldoras, que entran mejor en el arco.
+#define ESQ_R        124
+#define CAB_X        44          // botón "volver": su extremo redondeado queda dentro del arco superior izquierdo
+#define CAB_Y        18
+#define CAB_ALTO     44
+#define TITULO_Y     26
+#define PIE_MARGEN   18          // botón inferior de 52 px: margen al borde de abajo
+#define BOTON_ANCHO  320         // ancho máximo de un botón píldora pegado abajo
+#define COL_X        32          // columna de texto en pantallas densas (a esa x se ve desde y=38 hasta 464)
+#define POPUP_ANCHO  350
+#define POPUP_Y      30
+
 static const char *DIAS[] = { "domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado" };
 static const char *MESES[] = { "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
                                "septiembre", "octubre", "noviembre", "diciembre" };
@@ -58,8 +72,8 @@ static lv_obj_t *boton(lv_obj_t *padre, const char *texto, uint32_t color, lv_ev
 {
     lv_obj_t *b = lv_button_create(padre);
     lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
-    lv_obj_set_style_radius(b, 14, 0);
-    lv_obj_set_style_pad_hor(b, 22, 0);
+    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);   // píldora: sus extremos redondos caben en las esquinas
+    lv_obj_set_style_pad_hor(b, 24, 0);
     lv_obj_set_style_pad_ver(b, 12, 0);
     lv_obj_set_style_min_height(b, 52, 0);   // objetivo táctil cómodo para el dedo
     lv_obj_t *l = etiqueta(b, F20, lv_color_white(), texto);
@@ -67,6 +81,19 @@ static lv_obj_t *boton(lv_obj_t *padre, const char *texto, uint32_t color, lv_ev
     if (cb) {
         lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     }
+    return b;
+}
+
+// Cabecera común: botón "volver" fuera del arco de la esquina y título centrado a su derecha.
+static lv_obj_t *cabecera(lv_obj_t *scr, const char *volver, lv_event_cb_t cb, const char *titulo)
+{
+    lv_obj_t *b = boton(scr, volver, 0x222222, cb);
+    lv_obj_set_style_min_height(b, CAB_ALTO, 0);
+    lv_obj_set_style_pad_ver(b, 8, 0);
+    lv_obj_set_style_pad_hor(b, 18, 0);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, CAB_X, CAB_Y);
+    lv_obj_t *t = etiqueta(scr, F24, lv_color_white(), titulo);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 50, TITULO_Y);
     return b;
 }
 
@@ -249,7 +276,7 @@ static void crear_reloj(void)
     lv_obj_align(lbl_notifs, LV_ALIGN_CENTER, 0, 70);
 
     lbl_pie = etiqueta(scr_reloj, F16, GRIS(), "Abajo: notificaciones · arriba: ajustes");
-    lv_obj_align(lbl_pie, LV_ALIGN_BOTTOM_MID, 0, -24);
+    lv_obj_align(lbl_pie, LV_ALIGN_BOTTOM_MID, 0, -34);
 
     // Botón de micrófono: abre la pantalla ANDIA y empieza a escuchar.
     btn_mic = lv_button_create(scr_reloj);
@@ -268,10 +295,7 @@ static void crear_andia(void)
     pantalla_negra(scr_andia);
     lv_obj_add_event_cb(scr_andia, gesto_andia, LV_EVENT_GESTURE, NULL);
 
-    lv_obj_t *volver = boton(scr_andia, LV_SYMBOL_LEFT "  Reloj", 0x222222, al_pulsar_volver_reloj);
-    lv_obj_align(volver, LV_ALIGN_TOP_LEFT, 12, 10);
-    lv_obj_t *titulo = etiqueta(scr_andia, F24, lv_color_white(), "ANDIA");
-    lv_obj_align(titulo, LV_ALIGN_TOP_MID, 50, 22);
+    cabecera(scr_andia, LV_SYMBOL_LEFT "  Reloj", al_pulsar_volver_reloj, "ANDIA");
 
     and_estado = etiqueta(scr_andia, F16, AZUL(), "Lista");
     lv_obj_align(and_estado, LV_ALIGN_TOP_MID, 0, 74);
@@ -282,7 +306,7 @@ static void crear_andia(void)
     lv_obj_align(and_pregunta, LV_ALIGN_TOP_LEFT, 20, 104);
 
     lv_obj_t *caja = lv_obj_create(scr_andia);
-    lv_obj_set_size(caja, 390, 502 - 170 - 90);
+    lv_obj_set_size(caja, 390, 502 - 170 - 52 - PIE_MARGEN - 8);
     lv_obj_align(caja, LV_ALIGN_TOP_MID, 0, 170);
     lv_obj_set_style_bg_opa(caja, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(caja, 0, 0);
@@ -293,8 +317,8 @@ static void crear_andia(void)
     lv_label_set_long_mode(and_respuesta, LV_LABEL_LONG_MODE_WRAP);
 
     and_boton = boton(scr_andia, LV_SYMBOL_AUDIO "  Hablar", 0x1f3a5a, al_pulsar_boton_andia);
-    lv_obj_set_width(and_boton, 380);
-    lv_obj_align(and_boton, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_set_width(and_boton, BOTON_ANCHO);
+    lv_obj_align(and_boton, LV_ALIGN_BOTTOM_MID, 0, -PIE_MARGEN);
     and_boton_lbl = lv_obj_get_child(and_boton, 0);
 }
 
@@ -304,47 +328,43 @@ static void crear_ajustes(int brillo_pct)
     pantalla_negra(scr_ajustes);
     lv_obj_add_event_cb(scr_ajustes, gesto_ajustes, LV_EVENT_GESTURE, NULL);
 
-    lv_obj_t *volver = boton(scr_ajustes, LV_SYMBOL_DOWN " Reloj", 0x222222, al_pulsar_volver_reloj);
-    lv_obj_align(volver, LV_ALIGN_TOP_LEFT, 16, 12);
-
-    lv_obj_t *titulo = etiqueta(scr_ajustes, F24, lv_color_white(), "Ajustes");
-    lv_obj_align(titulo, LV_ALIGN_TOP_MID, 40, 22);
+    cabecera(scr_ajustes, LV_SYMBOL_DOWN " Reloj", al_pulsar_volver_reloj, "Ajustes");
 
     lv_obj_t *l = etiqueta(scr_ajustes, F16, GRIS(), "Brillo");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 20, 78);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 78);
     slider_brillo = lv_slider_create(scr_ajustes);
-    lv_obj_set_size(slider_brillo, 360, 14);
+    lv_obj_set_size(slider_brillo, 410 - 2 * COL_X, 14);
     lv_obj_align(slider_brillo, LV_ALIGN_TOP_MID, 0, 108);
     lv_slider_set_range(slider_brillo, 5, 100);
     lv_slider_set_value(slider_brillo, brillo_pct, LV_ANIM_OFF);
     lv_obj_add_event_cb(slider_brillo, al_mover_brillo, LV_EVENT_VALUE_CHANGED, NULL);
 
     l = etiqueta(scr_ajustes, F20, lv_color_white(), "Bluetooth");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 20, 160);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 160);
     char buf[64];
     snprintf(buf, sizeof(buf), "Nombre: %s", nombre);
     l = etiqueta(scr_ajustes, F16, GRIS(), buf);
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 20, 194);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 194);
     lbl_ble_estado = etiqueta(scr_ajustes, F16, lv_color_white(), "Anunciando…");
-    lv_obj_align(lbl_ble_estado, LV_ALIGN_TOP_LEFT, 20, 220);
+    lv_obj_align(lbl_ble_estado, LV_ALIGN_TOP_LEFT, COL_X, 220);
     lbl_ble_dir = etiqueta(scr_ajustes, F16, GRIS(), "Dirección: --");
-    lv_obj_align(lbl_ble_dir, LV_ALIGN_TOP_LEFT, 20, 246);
+    lv_obj_align(lbl_ble_dir, LV_ALIGN_TOP_LEFT, COL_X, 246);
     lbl_ble_bond = etiqueta(scr_ajustes, F16, GRIS(), "Emparejamiento guardado: no");
-    lv_obj_align(lbl_ble_bond, LV_ALIGN_TOP_LEFT, 20, 272);
+    lv_obj_align(lbl_ble_bond, LV_ALIGN_TOP_LEFT, COL_X, 272);
 
     lv_obj_t *olvidar = boton(scr_ajustes, "Olvidar iPhone", 0x7a1c1c, al_pulsar_olvidar);
     lv_obj_set_width(olvidar, 300);
-    lv_obj_align(olvidar, LV_ALIGN_TOP_LEFT, 20, 306);
+    lv_obj_align(olvidar, LV_ALIGN_TOP_LEFT, COL_X, 306);
     btn_olvidar_lbl = lv_obj_get_child(olvidar, 0);
     l = etiqueta(scr_ajustes, F16, GRIS(), "(en el iPhone: Ajustes > Bluetooth > Omitir)");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 20, 352);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 352);
 
     l = etiqueta(scr_ajustes, F20, lv_color_white(), "Acerca de");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 20, 400);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 400);
     lbl_acerca = etiqueta(scr_ajustes, F16, GRIS(), "");
-    lv_obj_align(lbl_acerca, LV_ALIGN_TOP_LEFT, 20, 434);
+    lv_obj_align(lbl_acerca, LV_ALIGN_TOP_LEFT, COL_X, 434);
     lv_obj_t *pie = etiqueta(scr_ajustes, F16, GRIS(), "Desliza hacia abajo: reloj");
-    lv_obj_align(pie, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_align(pie, LV_ALIGN_BOTTOM_MID, 0, -14);
 }
 
 static void crear_lista(void)
@@ -353,17 +373,16 @@ static void crear_lista(void)
     pantalla_negra(scr_lista);
     lv_obj_add_event_cb(scr_lista, gesto_lista, LV_EVENT_GESTURE, NULL);
 
-    lv_obj_t *volver = boton(scr_lista, LV_SYMBOL_LEFT " Reloj", 0x222222, al_pulsar_volver_reloj);
-    lv_obj_align(volver, LV_ALIGN_TOP_LEFT, 12, 10);
-    lv_obj_t *titulo = etiqueta(scr_lista, F24, lv_color_white(), "Notificaciones");
-    lv_obj_align(titulo, LV_ALIGN_TOP_MID, 50, 22);
+    cabecera(scr_lista, LV_SYMBOL_LEFT " Reloj", al_pulsar_volver_reloj, "Notificaciones");
 
     lista_cont = lv_obj_create(scr_lista);
-    lv_obj_set_size(lista_cont, 410, 502 - 70);
-    lv_obj_align(lista_cont, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_set_size(lista_cont, 410, 502 - 72);
+    lv_obj_align(lista_cont, LV_ALIGN_TOP_MID, 0, 72);
     lv_obj_set_style_bg_opa(lista_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(lista_cont, 0, 0);
-    lv_obj_set_style_pad_all(lista_cont, 8, 0);
+    lv_obj_set_style_pad_hor(lista_cont, 12, 0);
+    lv_obj_set_style_pad_top(lista_cont, 8, 0);
+    lv_obj_set_style_pad_bottom(lista_cont, 56, 0);   // la última tarjeta puede subir por encima del arco inferior
     lv_obj_set_style_pad_row(lista_cont, 8, 0);
     lv_obj_set_flex_flow(lista_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_scroll_dir(lista_cont, LV_DIR_VER);
@@ -378,11 +397,10 @@ static void crear_detalle(void)
     pantalla_negra(scr_detalle);
     lv_obj_add_event_cb(scr_detalle, gesto_detalle, LV_EVENT_GESTURE, NULL);
 
-    lv_obj_t *volver = boton(scr_detalle, LV_SYMBOL_LEFT "  Lista", 0x222222, al_pulsar_volver_lista);
-    lv_obj_align(volver, LV_ALIGN_TOP_LEFT, 12, 10);
+    cabecera(scr_detalle, LV_SYMBOL_LEFT "  Lista", al_pulsar_volver_lista, "Notificación");
     lv_obj_t *descartar = boton(scr_detalle, LV_SYMBOL_TRASH "  Descartar", 0x7a1c1c, al_pulsar_descartar);
-    lv_obj_set_width(descartar, 380);
-    lv_obj_align(descartar, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_set_width(descartar, BOTON_ANCHO);
+    lv_obj_align(descartar, LV_ALIGN_BOTTOM_MID, 0, -PIE_MARGEN);
 
     det_cab = etiqueta(scr_detalle, F16, AZUL(), "");
     lv_obj_align(det_cab, LV_ALIGN_TOP_LEFT, 20, 74);
@@ -396,7 +414,7 @@ static void crear_detalle(void)
     lv_obj_align_to(det_sub, det_titulo, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 6);
 
     lv_obj_t *caja = lv_obj_create(scr_detalle);
-    lv_obj_set_size(caja, 390, 502 - 210 - 80);
+    lv_obj_set_size(caja, 390, 502 - 200 - 52 - PIE_MARGEN - 8);
     lv_obj_align(caja, LV_ALIGN_TOP_MID, 0, 200);
     lv_obj_set_style_bg_opa(caja, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(caja, 0, 0);
@@ -432,12 +450,12 @@ static void crear_llamada(void)
 static void crear_popup(void)
 {
     popup = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(popup, 394, 150);
-    lv_obj_align(popup, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_set_size(popup, POPUP_ANCHO, 150);
+    lv_obj_align(popup, LV_ALIGN_TOP_MID, 0, POPUP_Y);
     lv_obj_set_style_bg_color(popup, lv_color_hex(0x1f2a3a), 0);
     lv_obj_set_style_border_color(popup, AZUL(), 0);
     lv_obj_set_style_border_width(popup, 2, 0);
-    lv_obj_set_style_radius(popup, 16, 0);
+    lv_obj_set_style_radius(popup, 24, 0);
     lv_obj_set_style_pad_all(popup, 12, 0);
     lv_obj_remove_flag(popup, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(popup, LV_OBJ_FLAG_HIDDEN);
@@ -446,11 +464,11 @@ static void crear_popup(void)
     pop_app = etiqueta(popup, F16, AZUL(), "");
     lv_obj_align(pop_app, LV_ALIGN_TOP_LEFT, 0, 0);
     pop_titulo = etiqueta(popup, F20, lv_color_white(), "");
-    lv_obj_set_width(pop_titulo, 366);
+    lv_obj_set_width(pop_titulo, POPUP_ANCHO - 28);
     lv_label_set_long_mode(pop_titulo, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_align(pop_titulo, LV_ALIGN_TOP_LEFT, 0, 26);
     pop_msg = etiqueta(popup, F16, GRIS(), "");
-    lv_obj_set_width(pop_msg, 366);
+    lv_obj_set_width(pop_msg, POPUP_ANCHO - 28);
     lv_obj_set_height(pop_msg, 70);
     lv_label_set_long_mode(pop_msg, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(pop_msg, LV_ALIGN_TOP_LEFT, 0, 54);
@@ -763,3 +781,4 @@ void ui_al_olvidar(ui_cb_t cb) { cb_olvidar = cb; }
 void ui_al_cambiar_brillo(ui_cb_int_t cb) { cb_brillo = cb; }
 void ui_al_descartar(ui_cb_uid_t cb) { cb_descartar = cb; }
 void ui_al_llamada(ui_cb_llamada_t cb) { cb_llamada = cb; }
+

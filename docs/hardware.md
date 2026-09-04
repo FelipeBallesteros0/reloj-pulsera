@@ -61,3 +61,11 @@ Sin backlight PWM: el brillo es el registro 0x51 del panel (0-255). `LCD_TE` exi
 
 ## Batería
 - Li-Po 3,7 V, conector MX1.25, ~400 mAh. Waveshare: 1 h a brillo máximo, 3-4 h con pantalla apagada, ~6 h en bajo consumo.
+
+## Esquinas redondeadas de la pantalla
+
+El AMOLED de 410×502 tiene las cuatro esquinas redondeadas con un radio de **~110-120 px** (medido el 2026-09-04
+dibujando arcos concéntricos: el de 100 px se corta, el de 120 px se ve entero). Consecuencias para la UI (ver
+constantes `ESQ_R`, `CAB_X`, `BOTON_ANCHO`… en `reloj_ui/ui.c`): nada rectangular puede acercarse a una esquina a
+menos de ~38 px en diagonal; los botones pegados abajo son píldoras de ≤ 320 px con 18 px de margen; el botón
+"volver" va en (44, 18); el popup empieza en y=30 con 350 px de ancho; en una columna a x=32 se ve desde y=38 hasta 464.
