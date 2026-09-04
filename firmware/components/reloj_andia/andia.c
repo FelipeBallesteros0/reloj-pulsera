@@ -377,7 +377,7 @@ esp_err_t andia_init(QueueHandle_t q)
         .reconnect_timeout_ms = 5000,
         .network_timeout_ms = 8000,
         .task_stack = 5120,       // con TLS (wss://) la tarea necesita algo más de pila
-        .ping_interval_sec = 0,
+        .ping_interval_sec = 120,     // 0 sería el valor por defecto (10 s) y su PING compite con el audio por el candado
         .disable_auto_reconnect = false,
     };
     ws = esp_websocket_client_init(&cfg);

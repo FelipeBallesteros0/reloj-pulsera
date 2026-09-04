@@ -22,3 +22,12 @@ llega el audio de respuesta. Ahora está en 16384; con `MBEDTLS_DYNAMIC_BUFFER` 
 cada registro y se libera al consumirlo, así que solo cuesta RAM mientras llega un registro grande. Para que sean chicos,
 el audio va en **IMA ADPCM 4:1** (8 KB/s) y la Pi espacia los trozos (medido tras el cambio: registro mayor 2085 B). Con
 las ventanas TCP de 2880 B, PCM crudo (32 KB/s) exigía RTT < 90 ms; con ADPCM basta < 360 ms.
+| 2026-09-04 | 4657c9c | F3e final: WiFi + BLE en reposo (tarea de voz y de envío permanentes) | ~53 000 B | ~37 000 B | +4 KB tarea de voz, +3,6 KB tarea de envío, +3 KB cola de bloques, +1 KB búfer WS |
+| 2026-09-04 | 4657c9c | wss:// conectado (TLS 1.2) | ~41 000 B | ~25 000 B | |
+| 2026-09-04 | 4657c9c | en conversación (captura + subida) | ~25 000 B | ~14 500 B | un registro TLS de 16 KB ya no cabría: por eso el audio va en ADPCM y espaciado (registros ≤ 2 KB) |
+
+Subida de audio por el hotspot (medido): cada mensaje WebSocket cuesta ~210 ms sin importar su tamaño (RTT ~150 ms
+más el ACK retrasado del otro extremo), así que con una trama por mensaje solo salía 1 de cada 6 tramas (el DMA
+descartaba el resto mientras la captura esperaba). Solución: cola de bloques + tarea de envío que junta hasta 7 bloques
+(224 ms) por mensaje, TCP_NODELAY, WiFi sin ahorro durante la conversación y ventanas TCP de 5760 B para tener dos
+mensajes en vuelo. Con 2880 B iba justo al tiempo real (1-2 tramas descartadas por frase).
