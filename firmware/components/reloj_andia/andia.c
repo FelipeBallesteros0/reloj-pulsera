@@ -267,6 +267,9 @@ static void alimentar_audio(const uint8_t *datos, size_t n)
             vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
+    if (n > 0) {
+        ESP_LOGW(TAG, "audio de respuesta descartado: %u B (anillo lleno 300 ms)", (unsigned)n);
+    }
 }
 
 // Un mensaje binario = un bloque ADPCM (cabecera + nibbles). Puede llegar en varios fragmentos: la cabecera

@@ -15,6 +15,7 @@ static esp_codec_dev_handle_t mic, alt;
 static void (*cb_captura)(const uint8_t *, size_t);
 static volatile bool capturando, reproduciendo, fin_audio, tocando;
 static int tramas_a_descartar;             // tras reproducir, el DMA del micrófono trae lo acumulado (incluido el altavoz)
+static struct { int huecos, escrituras; int64_t inicio_us; } rep;   // diagnóstico de la reproducción
 #define TRAMAS_TRAS_REPRODUCIR 8            // ~256 ms
 static uint8_t mem_anillo[12 * 1024];      // 375 ms de audio mono (la reserva es de 200 ms)
 static anillo_t anillo;
@@ -77,6 +78,10 @@ static void tarea_voz(void *p)
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
             }
+            if (!tocando) {
+                rep.huecos = rep.escrituras = 0;
+                rep.inicio_us = esp_timer_get_time();
+            }
             tocando = true;
             size_t n = anillo_leer(&anillo, (uint8_t *)buf, sizeof(buf));   // 1024 B = 32 ms por escritura
             if (n == 0) {
@@ -84,11 +89,15 @@ static void tarea_voz(void *p)
                     reproduciendo = false;
                     tocando = false;
                     tramas_a_descartar = TRAMAS_TRAS_REPRODUCIR;
+                    ESP_LOGI(TAG, "reproducción: %d ms, %d escrituras, %d huecos (anillo vacío)",
+                             (int)((esp_timer_get_time() - rep.inicio_us) / 1000), rep.escrituras, rep.huecos);
                 } else {
+                    rep.huecos++;
                     vTaskDelay(pdMS_TO_TICKS(10));
                 }
                 continue;
             }
+            rep.escrituras++;
             esp_codec_dev_write(alt, buf, n);
         } else if (capturando) {
             int64_t t0 = esp_timer_get_time();
