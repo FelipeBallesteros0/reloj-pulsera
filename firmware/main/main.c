@@ -107,18 +107,38 @@ static void cb_vigilia(bool activa)
     andia_vigilia(activa);
 }
 
+// Onda cuadrada de `hz` durante `ms` (≤ 150) directo al anillo de reproducción.
+static void tono(int hz, int ms)
+{
+    static int16_t buf[VOZ_TASA * 150 / 1000];
+    size_t n = (size_t)VOZ_TASA * ms / 1000;
+    int medio_periodo = VOZ_TASA / hz / 2;
+    for (size_t i = 0; i < n && i < sizeof(buf) / 2; i++) {
+        buf[i] = (int16_t)(12000 * ((i / medio_periodo) % 2 ? 1 : -1));
+    }
+    voz_reproducir_alimentar((uint8_t *)buf, n * 2);
+}
+
+static void silencio(int ms)
+{
+    static const int16_t nada[VOZ_TASA * 100 / 1000];
+    voz_reproducir_alimentar((const uint8_t *)nada, (size_t)VOZ_TASA * ms / 1000 * 2);
+}
+
 static void pitidos(int n)
 {
-    // Tono de 880 Hz, 120 ms, repetido n veces con pausas; va directo al anillo de reproducción.
-    static int16_t tono[VOZ_TASA * 120 / 1000];
-    static int16_t silencio[VOZ_TASA * 100 / 1000];
-    for (size_t i = 0; i < sizeof(tono) / 2; i++) {
-        tono[i] = (int16_t)(9000 * ((i / 9) % 2 ? 1 : -1));   // onda cuadrada ~880 Hz (16000/18)
-    }
     for (int k = 0; k < n; k++) {
-        voz_reproducir_alimentar((uint8_t *)tono, sizeof(tono));
-        voz_reproducir_alimentar((uint8_t *)silencio, sizeof(silencio));
+        tono(880, 120);
+        silencio(100);
     }
+    voz_reproducir_fin();
+}
+
+// "Te oí": doble tono ascendente cuando la Pi reconoce el nombre.
+static void son_activacion(void)
+{
+    tono(880, 90);
+    tono(1320, 140);
     voz_reproducir_fin();
 }
 
@@ -173,8 +193,8 @@ static void evento_andia(const andia_evento_t *ev)
         ui_andia_estado(ev->estado);
         pantalla_unlock();
         break;
-    case ANDIA_EV_SIGUE:
-        pitidos(1);
+    case ANDIA_EV_SIGUE:            // la Pi reconoció el nombre: suena "te oí" (y quizá sigue escuchando)
+        son_activacion();
         encender_pantalla();
         break;
     case ANDIA_EV_PREGUNTA:

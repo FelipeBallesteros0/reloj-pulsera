@@ -178,6 +178,8 @@ static void procesar_mensaje(const char *json)
             ESP_LOGI(TAG, "vigilia: la Pi confirmó \"Oye Andia\"");
             en_gesto = false;
             red_ahorro(false);
+            andia_evento_t ev = { .tipo = ANDIA_EV_SIGUE };   // "te oí" (la frase ya está enviada: no estorba)
+            publicar(&ev);
         }
         poner_estado(ANDIA_ACTIVADA);
     } else if (strcmp(tipo, "pensando") == 0) {
