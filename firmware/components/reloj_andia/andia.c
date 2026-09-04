@@ -388,26 +388,36 @@ static void tarea_enviar(void *arg)
     }
 }
 
-// Detector de voz cercana para la vigilia: RMS de la trama frente a un piso de ruido que se adapta despacio.
-// Dispara con 4 tramas seguidas (128 ms) claramente por encima del piso; la Pi decide después si era "Oye Andia".
+// Detector de voz cercana para la vigilia: RMS de la trama frente a un piso de ruido que se adapta despacio, y
+// pocos cruces por cero (las frases de activación son vocálicas: "Oye", "Hola", "Andia"; un chasquido, el teclado
+// o un roce son agudos y tienen muchos). Dispara con 6 tramas seguidas (192 ms); la Pi decide si era "Oye Andia".
+#define ZC_MAX_VOZ 60      // cruces por cero por trama de 512 muestras (~1900/s); un chasquido pasa de 4000/s
 static void detectar_voz(const int16_t *pcm, size_t muestras)
 {
     static float piso = 300;
     static int seguidas;
     int64_t suma = 0;
+    int cruces = 0;
     for (size_t i = 0; i < muestras; i++) {
         suma += (int32_t)pcm[i] * pcm[i];
+        if (i && ((pcm[i] < 0) != (pcm[i - 1] < 0))) {
+            cruces++;
+        }
     }
     float rms = sqrtf((float)(suma / (int64_t)muestras));
-    bool alto = rms > 600 && rms > 3 * piso;
-    if (!alto) {
+    bool fuerte = rms > 600 && rms > 3 * piso;
+    if (!fuerte) {
         piso += (rms - piso) * 0.02f;          // ~1,5 s de constante de tiempo
         if (piso < 100) piso = 100;
         if (piso > 3000) piso = 3000;
         seguidas = 0;
         return;
     }
-    if (++seguidas < 4) {
+    if (cruces > ZC_MAX_VOZ) {                 // fuerte pero agudo: no es una vocal
+        seguidas = 0;
+        return;
+    }
+    if (++seguidas < 6) {
         return;
     }
     seguidas = 0;
@@ -415,7 +425,7 @@ static void detectar_voz(const int16_t *pcm, size_t muestras)
         esp_timer_get_time() < vigilia_pausa_hasta_us) {
         return;
     }
-    ESP_LOGI(TAG, "vigilia: voz cerca (RMS %d, piso %d): mando la frase", (int)rms, (int)piso);
+    ESP_LOGI(TAG, "vigilia: voz cerca (RMS %d, piso %d, %d cruces): mando la frase", (int)rms, (int)piso, cruces);
     memset(&envio, 0, sizeof(envio));
     en_gesto = true;
     armar_vigilante();
