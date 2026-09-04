@@ -17,7 +17,7 @@ typedef enum {
     ANDIA_EV_ERROR,         // algo falló (texto legible)
     ANDIA_EV_AVISO,         // mensaje empujado por la Pi (texto + origen)
     ANDIA_EV_TEMPORIZADOR,  // el reloj debe contar N segundos y avisar
-    ANDIA_EV_SIGUE,         // la Pi reconoció el nombre (en vigilia, o dijiste solo el nombre): pitar
+    ANDIA_EV_SIGUE,         // dijiste solo el nombre: pitar y seguir escuchando la pregunta
 } andia_evento_tipo_t;
 
 typedef enum {

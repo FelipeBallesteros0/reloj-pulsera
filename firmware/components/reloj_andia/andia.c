@@ -181,8 +181,6 @@ static void procesar_mensaje(const char *json)
             ESP_LOGI(TAG, "vigilia: la Pi confirmó \"Oye Andia\"");
             en_gesto = false;
             red_ahorro(false);
-            andia_evento_t ev = { .tipo = ANDIA_EV_SIGUE };   // "te oí" (la frase ya está enviada: no estorba)
-            publicar(&ev);
         }
         poner_estado(ANDIA_ACTIVADA);
     } else if (strcmp(tipo, "pensando") == 0) {
@@ -259,7 +257,7 @@ static void procesar_mensaje(const char *json)
 static void alimentar_audio(const uint8_t *datos, size_t n)
 {
     // La Pi manda el audio más rápido que el tiempo real: si el anillo está lleno, esperar un poco.
-    for (int intento = 0; n > 0 && intento < 60; intento++) {
+    for (int intento = 0; n > 0 && intento < 200; intento++) {   // hasta 1 s: el anillo es de 375 ms
         size_t cupo = voz_reproducir_alimentar(datos, n);
         datos += cupo;
         n -= cupo;
@@ -268,7 +266,7 @@ static void alimentar_audio(const uint8_t *datos, size_t n)
         }
     }
     if (n > 0) {
-        ESP_LOGW(TAG, "audio de respuesta descartado: %u B (anillo lleno 300 ms)", (unsigned)n);
+        ESP_LOGW(TAG, "audio de respuesta descartado: %u B (anillo lleno 1 s)", (unsigned)n);
     }
 }
 
@@ -440,6 +438,7 @@ static void detectar_voz(const int16_t *pcm, size_t muestras)
         return;
     }
     ESP_LOGI(TAG, "vigilia: voz cerca (RMS %d, piso %d, %d cruces): mando la frase", (int)rms, (int)piso, cruces);
+    red_ahorro(false);                         // con ahorro, cada mensaje tardaba ~110 ms y se perdían tramas
     memset(&envio, 0, sizeof(envio));
     en_gesto = true;
     armar_vigilante();

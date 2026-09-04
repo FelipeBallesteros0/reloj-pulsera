@@ -145,8 +145,8 @@ bool voz_capturando(void) { return capturando; }
 size_t voz_reproducir_alimentar(const uint8_t *pcm, size_t n)
 {
     size_t cupo = anillo_escribir(&anillo, pcm, n);
+    fin_audio = false;      // audio nuevo anula cualquier "fin" pendiente (p. ej. el de un pitido justo antes)
     if (!reproduciendo) {
-        fin_audio = false;
         tocando = false;
         reproduciendo = true;
         if (tarea) {
