@@ -25,6 +25,7 @@ static esp_timer_handle_t timer_vigilante, timer_ping;
 static char id_reloj[13];
 static bool con_adpcm;                    // el servidor aceptó audio comprimido 4:1 en ambos sentidos
 static adpcm_estado_t codificador, decodificador;
+static struct { int tramas, fallidas; int64_t total_us, max_us; } envio;   // diagnóstico de la subida de audio
 
 // ---------------------------------------------------------------- utilidades
 
@@ -77,6 +78,10 @@ static void enviar_json(const char *json)
 
 static void terminar_conversacion(void)
 {
+    if (envio.tramas) {
+        ESP_LOGI(TAG, "audio: %d tramas enviadas, %d fallidas, envío máx %d ms", envio.tramas, envio.fallidas,
+                 (int)(envio.max_us / 1000));
+    }
     voz_capturar_detener();
     esp_timer_stop(timer_vigilante);
     poner_estado(ANDIA_INACTIVA);
@@ -223,6 +228,7 @@ static void al_evento_ws(void *arg, esp_event_base_t base, int32_t id, void *dat
 static void al_capturar(const uint8_t *pcm, size_t n)
 {
     if (!ws || !esp_websocket_client_is_connected(ws)) {
+        envio.fallidas++;
         return;
     }
     const char *datos = (const char *)pcm;
@@ -235,9 +241,20 @@ static void al_capturar(const uint8_t *pcm, size_t n)
         datos = (const char *)bloque;
     }
     // Un corte de red más largo que este plazo aborta la conexión (así lo hace el cliente); 4:1 deja margen.
+    int64_t t0 = esp_timer_get_time();
     int r = esp_websocket_client_send_bin(ws, datos, n, pdMS_TO_TICKS(1500));
+    int64_t dt = esp_timer_get_time() - t0;
+    envio.total_us += dt;
+    if (dt > envio.max_us) {
+        envio.max_us = dt;
+    }
     if (r < 0) {
+        envio.fallidas++;
         ESP_LOGW(TAG, "trama de audio no enviada");
+    }
+    if (++envio.tramas % 64 == 0) {
+        ESP_LOGI(TAG, "audio: %d tramas de %u B, envío medio %d ms, máx %d ms, fallidas %d", envio.tramas, (unsigned)n,
+                 (int)(envio.total_us / envio.tramas / 1000), (int)(envio.max_us / 1000), envio.fallidas);
     }
 }
 
@@ -323,10 +340,17 @@ esp_err_t andia_conversar(bool gesto)
     }
     enviar_json(gesto ? "{\"t\":\"inicio\",\"modo\":\"gesto\"}" : "{\"t\":\"inicio\",\"modo\":\"boton\"}");
     codificador = (adpcm_estado_t){ 0 };
+    memset(&envio, 0, sizeof(envio));
     poner_estado(ANDIA_ESCUCHANDO);
     esp_timer_stop(timer_vigilante);
     esp_timer_start_once(timer_vigilante, 25 * 1000000ULL);
-    return voz_capturar_iniciar(al_capturar);
+    esp_err_t r = voz_capturar_iniciar(al_capturar);
+    if (r != ESP_OK) {
+        enviar_json("{\"t\":\"cancelar\"}");
+        terminar_conversacion();
+        publicar_texto(ANDIA_EV_ERROR, "Micrófono no disponible", NULL);
+    }
+    return r;
 }
 
 void andia_cancelar(void)

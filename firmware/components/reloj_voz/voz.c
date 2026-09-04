@@ -9,12 +9,15 @@
 #include "anillo.h"
 
 static const char *TAG = "voz";
+static void tarea_voz(void *p);
 static esp_codec_dev_handle_t mic, alt;
 static void (*cb_captura)(const uint8_t *, size_t);
-static volatile bool capturando, reproduciendo, fin_audio;
+static volatile bool capturando, reproduciendo, fin_audio, tocando;
 static uint8_t mem_anillo[12 * 1024];      // 375 ms de audio mono (la reserva es de 200 ms)
 static anillo_t anillo;
+static TaskHandle_t tarea;
 #define RESERVA (VOZ_TASA * 2 * 200 / 1000)
+#define TRAMAS_POR_INFORME 64              // ~2 s de captura entre líneas de diagnóstico
 
 esp_err_t voz_init(void)
 {
@@ -28,73 +31,106 @@ esp_err_t voz_init(void)
     esp_codec_dev_set_in_gain(mic, 24.0f);
     esp_codec_dev_set_out_vol(alt, 60);
     anillo_init(&anillo, mem_anillo, sizeof(mem_anillo));
+    // Una sola tarea permanente para captura y reproducción (nunca ocurren a la vez): así no hay que reservar
+    // pila en plena conversación, cuando la RAM está en su mínimo con TLS abierto.
+    ESP_RETURN_ON_FALSE(xTaskCreate(tarea_voz, "voz", 4096, NULL, 5, &tarea) == pdPASS, ESP_FAIL, TAG, "tarea");
     ESP_LOGI(TAG, "códec listo (16 kHz mono)");
     return ESP_OK;
 }
 
-static void tarea_captura(void *p)
+// Diagnóstico de la captura: cada ~2 s, el nivel máximo (0-32767) y cuántas tramas salieron.
+static void medir_nivel(const int16_t *pcm, size_t n)
 {
-    static int16_t mono[512];
-    while (capturando) {
-        if (esp_codec_dev_read(mic, mono, sizeof(mono)) == 0) {
-            if (cb_captura && capturando) {
-                cb_captura((const uint8_t *)mono, sizeof(mono));
-            }
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(10));
+    static int nivel_max, tramas;
+    for (size_t i = 0; i < n; i++) {
+        int v = pcm[i] < 0 ? -pcm[i] : pcm[i];
+        if (v > nivel_max) {
+            nivel_max = v;
         }
     }
-    vTaskDelete(NULL);
+    if (++tramas >= TRAMAS_POR_INFORME) {
+        ESP_LOGI(TAG, "captura: %d tramas, nivel máx %d", tramas, nivel_max);
+        tramas = 0;
+        nivel_max = 0;
+    }
+}
+
+static void tarea_voz(void *p)
+{
+    static int16_t buf[512];
+    for (;;) {
+        if (capturando) {
+            if (esp_codec_dev_read(mic, buf, sizeof(buf)) == 0) {
+                medir_nivel(buf, 512);
+                if (cb_captura && capturando) {
+                    cb_captura((const uint8_t *)buf, sizeof(buf));
+                }
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+        } else if (reproduciendo) {
+            // Espera la reserva (o el fin, si la respuesta es más corta) antes de empezar a tocar.
+            if (!tocando && anillo_ocupado(&anillo) < RESERVA && !fin_audio) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+            tocando = true;
+            size_t n = anillo_leer(&anillo, (uint8_t *)buf, 512);
+            if (n == 0) {
+                if (fin_audio) {
+                    reproduciendo = false;
+                    tocando = false;
+                } else {
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                }
+                continue;
+            }
+            esp_codec_dev_write(alt, buf, n);
+        } else {
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+        }
+    }
 }
 
 esp_err_t voz_capturar_iniciar(void (*cb)(const uint8_t *, size_t))
 {
+    ESP_RETURN_ON_FALSE(mic && tarea, ESP_ERR_INVALID_STATE, TAG, "micrófono no disponible");
     if (capturando) {
         return ESP_OK;
     }
     cb_captura = cb;
     capturando = true;
-    return xTaskCreate(tarea_captura, "voz_cap", 3584, NULL, 5, NULL) == pdPASS ? ESP_OK : ESP_FAIL;
+    xTaskNotifyGive(tarea);
+    ESP_LOGI(TAG, "captura iniciada");
+    return ESP_OK;
 }
 
-void voz_capturar_detener(void) { capturando = false; }
-bool voz_capturando(void) { return capturando; }
-
-static void tarea_reproduccion(void *p)
+void voz_capturar_detener(void)
 {
-    static int16_t mono[256];
-    // Espera la reserva (o el fin, si la respuesta es más corta) antes de empezar a tocar.
-    while (reproduciendo && anillo_ocupado(&anillo) < RESERVA && !fin_audio) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+    if (capturando) {
+        capturando = false;
+        ESP_LOGI(TAG, "captura detenida");
     }
-    while (reproduciendo) {
-        size_t n = anillo_leer(&anillo, (uint8_t *)mono, sizeof(mono));
-        if (n == 0) {
-            if (fin_audio) {
-                break;
-            }
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-        esp_codec_dev_write(alt, mono, n);
-    }
-    reproduciendo = false;
-    vTaskDelete(NULL);
 }
+bool voz_capturando(void) { return capturando; }
 
 size_t voz_reproducir_alimentar(const uint8_t *pcm, size_t n)
 {
     size_t cupo = anillo_escribir(&anillo, pcm, n);
     if (!reproduciendo) {
-        reproduciendo = true;
         fin_audio = false;
-        xTaskCreate(tarea_reproduccion, "voz_rep", 3072, NULL, 5, NULL);
+        tocando = false;
+        reproduciendo = true;
+        if (tarea) {
+            xTaskNotifyGive(tarea);
+        }
+        ESP_LOGI(TAG, "reproducción iniciada");
     }
     return cupo;
 }
 
 void voz_reproducir_fin(void) { fin_audio = true; }
-void voz_reproducir_parar(void) { anillo_vaciar(&anillo); fin_audio = true; }
+void voz_reproducir_parar(void) { anillo_vaciar(&anillo); fin_audio = true; reproduciendo = false; tocando = false; }
 bool voz_reproduciendo(void) { return reproduciendo; }
 void voz_volumen(int pct)
 {

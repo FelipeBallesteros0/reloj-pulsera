@@ -88,6 +88,8 @@ static void cb_microfono(void)
     esp_err_t r = andia_conversar(false);
     if (r == ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "ANDIA ya está en una conversación");
+    } else if (r != ESP_OK) {
+        ESP_LOGW(TAG, "no se pudo iniciar la conversación: %s", esp_err_to_name(r));
     }
 }
 
@@ -276,8 +278,9 @@ static void refrescar_bateria(void)
     ui_bateria(pmic_bateria_pct(), pmic_cargando(), pmic_usb_conectado());
     ui_ram((unsigned)(esp_get_free_heap_size() / 1024));
     pantalla_unlock();
-    ESP_LOGI(TAG, "latido: RAM libre %u B, batería %d %% (%d mV), USB %s, BLE %d, pantalla %s",
-             (unsigned)esp_get_free_heap_size(), pmic_bateria_pct(), pmic_bateria_mv(),
+    ESP_LOGI(TAG, "latido: RAM libre %u B (bloque mayor %u B), batería %d %% (%d mV), USB %s, BLE %d, pantalla %s",
+             (unsigned)esp_get_free_heap_size(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+             pmic_bateria_pct(), pmic_bateria_mv(),
              pmic_usb_conectado() ? "sí" : "no", (int)ble_estado(), pantalla_encendida() ? "on" : "off");
     ESP_LOGI(TAG, "notificaciones: %d guardadas, %d sin leer, ANCS %s; WiFi %s (%s)", notif_store_cantidad(),
              notif_store_no_leidas(), ancs_listo() ? "suscrito" : "no", red_conectada() ? red_ssid() : "sin red", red_ip());
