@@ -14,6 +14,8 @@ static void tarea_voz(void *p);
 static esp_codec_dev_handle_t mic, alt;
 static void (*cb_captura)(const uint8_t *, size_t);
 static volatile bool capturando, reproduciendo, fin_audio, tocando;
+static int tramas_a_descartar;             // tras reproducir, el DMA del micrófono trae lo acumulado (incluido el altavoz)
+#define TRAMAS_TRAS_REPRODUCIR 8            // ~256 ms
 static uint8_t mem_anillo[12 * 1024];      // 375 ms de audio mono (la reserva es de 200 ms)
 static anillo_t anillo;
 static TaskHandle_t tarea;
@@ -80,6 +82,7 @@ static void tarea_voz(void *p)
                 if (fin_audio) {
                     reproduciendo = false;
                     tocando = false;
+                    tramas_a_descartar = TRAMAS_TRAS_REPRODUCIR;
                 } else {
                     vTaskDelay(pdMS_TO_TICKS(10));
                 }
@@ -90,6 +93,10 @@ static void tarea_voz(void *p)
             int64_t t0 = esp_timer_get_time();
             if (esp_codec_dev_read(mic, buf, sizeof(buf)) == 0) {
                 int64_t t1 = esp_timer_get_time();
+                if (tramas_a_descartar > 0) {
+                    tramas_a_descartar--;
+                    continue;
+                }
                 if (cb_captura && capturando) {
                     cb_captura((const uint8_t *)buf, sizeof(buf));
                 }
