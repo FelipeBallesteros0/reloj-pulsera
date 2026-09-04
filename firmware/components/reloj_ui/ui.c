@@ -89,19 +89,20 @@ static const char *nombre_app(const notif_t *n, char *buf, int cap) { return app
 
 // ---------------------------------------------------------------- gestos y navegación
 
+// Convención del teléfono: deslizar hacia abajo (desde arriba) = notificaciones; hacia arriba = ajustes.
 static void gesto_reloj(lv_event_t *e)
 {
     lv_dir_t d = lv_indev_get_gesture_dir(lv_indev_active());
     if (d == LV_DIR_BOTTOM) {
-        ui_ir_ajustes();
-    } else if (d == LV_DIR_TOP) {
         ui_ir_lista();
+    } else if (d == LV_DIR_TOP) {
+        ui_ir_ajustes();
     }
 }
 
 static void gesto_ajustes(lv_event_t *e)
 {
-    if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+    if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
         ui_ir_reloj();
     }
 }
@@ -109,7 +110,7 @@ static void gesto_ajustes(lv_event_t *e)
 static void gesto_lista(lv_event_t *e)
 {
     lv_dir_t d = lv_indev_get_gesture_dir(lv_indev_active());
-    if (d == LV_DIR_RIGHT || d == LV_DIR_BOTTOM) {
+    if (d == LV_DIR_RIGHT || d == LV_DIR_TOP) {
         ui_ir_reloj();
     }
 }
@@ -124,8 +125,27 @@ static void gesto_detalle(lv_event_t *e)
 static void al_pulsar_volver_reloj(lv_event_t *e) { ui_ir_reloj(); }
 static void al_pulsar_volver_lista(lv_event_t *e) { ui_ir_lista(); }
 
+static lv_obj_t *btn_olvidar_lbl;
+static lv_timer_t *olvidar_timer;
+
+static void desarmar_olvidar(lv_timer_t *t)
+{
+    lv_label_set_text(btn_olvidar_lbl, "Olvidar iPhone");
+    olvidar_timer = NULL;
+}
+
 static void al_pulsar_olvidar(lv_event_t *e)
 {
+    if (!olvidar_timer) {
+        // Primer toque: pedir confirmación durante 5 s (evita borrar el bond por un roce).
+        lv_label_set_text(btn_olvidar_lbl, "¿Seguro? Toca otra vez");
+        olvidar_timer = lv_timer_create(desarmar_olvidar, 5000, NULL);
+        lv_timer_set_repeat_count(olvidar_timer, 1);
+        return;
+    }
+    lv_timer_delete(olvidar_timer);
+    olvidar_timer = NULL;
+    lv_label_set_text(btn_olvidar_lbl, "Olvidar iPhone");
     if (cb_olvidar) {
         cb_olvidar();
     }
@@ -200,7 +220,7 @@ static void crear_reloj(void)
     lbl_notifs = etiqueta(scr_reloj, F20, AZUL(), "");
     lv_obj_align(lbl_notifs, LV_ALIGN_CENTER, 0, 70);
 
-    lbl_pie = etiqueta(scr_reloj, F16, GRIS(), "Arriba: notificaciones · abajo: ajustes");
+    lbl_pie = etiqueta(scr_reloj, F16, GRIS(), "Abajo: notificaciones · arriba: ajustes");
     lv_obj_align(lbl_pie, LV_ALIGN_BOTTOM_MID, 0, -24);
 }
 
@@ -210,7 +230,7 @@ static void crear_ajustes(int brillo_pct)
     pantalla_negra(scr_ajustes);
     lv_obj_add_event_cb(scr_ajustes, gesto_ajustes, LV_EVENT_GESTURE, NULL);
 
-    lv_obj_t *volver = boton(scr_ajustes, LV_SYMBOL_UP " Reloj", 0x222222, al_pulsar_volver_reloj);
+    lv_obj_t *volver = boton(scr_ajustes, LV_SYMBOL_DOWN " Reloj", 0x222222, al_pulsar_volver_reloj);
     lv_obj_align(volver, LV_ALIGN_TOP_LEFT, 16, 12);
 
     lv_obj_t *titulo = etiqueta(scr_ajustes, F24, lv_color_white(), "Ajustes");
@@ -239,7 +259,9 @@ static void crear_ajustes(int brillo_pct)
     lv_obj_align(lbl_ble_bond, LV_ALIGN_TOP_LEFT, 20, 272);
 
     lv_obj_t *olvidar = boton(scr_ajustes, "Olvidar iPhone", 0x7a1c1c, al_pulsar_olvidar);
+    lv_obj_set_width(olvidar, 300);
     lv_obj_align(olvidar, LV_ALIGN_TOP_LEFT, 20, 306);
+    btn_olvidar_lbl = lv_obj_get_child(olvidar, 0);
     l = etiqueta(scr_ajustes, F16, GRIS(), "(en el iPhone: Ajustes > Bluetooth > Omitir)");
     lv_obj_align(l, LV_ALIGN_TOP_LEFT, 20, 352);
 
@@ -247,7 +269,7 @@ static void crear_ajustes(int brillo_pct)
     lv_obj_align(l, LV_ALIGN_TOP_LEFT, 20, 400);
     lbl_acerca = etiqueta(scr_ajustes, F16, GRIS(), "");
     lv_obj_align(lbl_acerca, LV_ALIGN_TOP_LEFT, 20, 434);
-    lv_obj_t *pie = etiqueta(scr_ajustes, F16, GRIS(), "Desliza hacia arriba: reloj");
+    lv_obj_t *pie = etiqueta(scr_ajustes, F16, GRIS(), "Desliza hacia abajo: reloj");
     lv_obj_align(pie, LV_ALIGN_BOTTOM_MID, 0, -12);
 }
 
@@ -434,7 +456,7 @@ void ui_ble(ble_estado_t estado, bool tiene_bond, const char *direccion)
     snprintf(buf, sizeof(buf), "Dirección: %s", direccion);
     lv_label_set_text(lbl_ble_dir, buf);
     lv_label_set_text(lbl_ble_bond, tiene_bond ? "Emparejamiento guardado: sí" : "Emparejamiento guardado: no");
-    lv_label_set_text(lbl_pie, estado == BLE_VINCULADO ? "Arriba: notificaciones · abajo: ajustes"
+    lv_label_set_text(lbl_pie, estado == BLE_VINCULADO ? "Abajo: notificaciones · arriba: ajustes"
                                : "Sin iPhone · abajo: ajustes");
 }
 

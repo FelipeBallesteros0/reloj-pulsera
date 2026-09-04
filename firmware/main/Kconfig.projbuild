@@ -11,9 +11,9 @@ menu "Reloj"
 
     config RELOJ_TACTIL_ESPEJO_Y
         bool "Espejar el eje Y del táctil"
-        default y
+        default n
         help
-            En esta placa el FT3168 entrega Y invertido respecto del panel: sin espejo los gestos salen al revés.
+            Verificado 2026-09-03 con la traza de toques: el FT3168 ya viene alineado con el panel (sin espejo).
 
     config RELOJ_TACTIL_ESPEJO_X
         bool "Espejar el eje X del táctil"
