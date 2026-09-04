@@ -17,6 +17,7 @@ typedef enum {
     ANDIA_EV_ERROR,         // algo falló (texto legible)
     ANDIA_EV_AVISO,         // mensaje empujado por la Pi (texto + origen)
     ANDIA_EV_TEMPORIZADOR,  // el reloj debe contar N segundos y avisar
+    ANDIA_EV_SIGUE,         // dijiste solo el nombre: pitar y seguir escuchando la pregunta
 } andia_evento_tipo_t;
 
 typedef enum {
@@ -42,6 +43,10 @@ typedef struct {
 esp_err_t andia_init(QueueHandle_t cola);    // prepara el cliente; no conecta hasta la primera conversación
 esp_err_t andia_conversar(bool gesto);       // abre la conexión si hace falta, manda "inicio" y empieza a capturar
 void andia_cancelar(void);
+// Vigilia ("Oye Andia" sin tocar nada): el micrófono captura siempre en local y, cuando hay voz cerca, manda la
+// frase en modo gesto para que la Pi decida si empezaba por el nombre. Mantiene la conexión abierta.
+void andia_vigilia(bool activa);
+bool andia_vigilia_activa(void);
 andia_estado_t andia_estado(void);
 bool andia_conectada(void);                  // WebSocket abierto con la Pi
 

@@ -52,6 +52,9 @@ static lv_obj_t *scr_antes_llamada;
 
 static ui_cb_t cb_olvidar, cb_microfono, cb_cancelar_andia;
 static ui_cb_int_t cb_brillo;
+static ui_cb_bool_t cb_vigilia;
+static lv_obj_t *sw_vigilia;
+static bool vigilia_on;
 static ui_cb_uid_t cb_descartar;
 static ui_cb_llamada_t cb_llamada;
 static char nombre[32];
@@ -206,6 +209,14 @@ static void al_pulsar_olvidar(lv_event_t *e)
     }
 }
 
+static void al_cambiar_vigilia(lv_event_t *e)
+{
+    vigilia_on = lv_obj_has_state(sw_vigilia, LV_STATE_CHECKED);
+    if (cb_vigilia) {
+        cb_vigilia(vigilia_on);
+    }
+}
+
 static void al_mover_brillo(lv_event_t *e)
 {
     if (cb_brillo) {
@@ -339,30 +350,35 @@ static void crear_ajustes(int brillo_pct)
     lv_slider_set_value(slider_brillo, brillo_pct, LV_ANIM_OFF);
     lv_obj_add_event_cb(slider_brillo, al_mover_brillo, LV_EVENT_VALUE_CHANGED, NULL);
 
+    l = etiqueta(scr_ajustes, F20, lv_color_white(), "\"Oye Andia\" siempre");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 144);
+    sw_vigilia = lv_switch_create(scr_ajustes);
+    lv_obj_set_size(sw_vigilia, 64, 32);
+    lv_obj_align(sw_vigilia, LV_ALIGN_TOP_RIGHT, -COL_X, 140);
+    lv_obj_add_event_cb(sw_vigilia, al_cambiar_vigilia, LV_EVENT_VALUE_CHANGED, NULL);
+
     l = etiqueta(scr_ajustes, F20, lv_color_white(), "Bluetooth");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 160);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 190);
     char buf[64];
     snprintf(buf, sizeof(buf), "Nombre: %s", nombre);
     l = etiqueta(scr_ajustes, F16, GRIS(), buf);
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 194);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 222);
     lbl_ble_estado = etiqueta(scr_ajustes, F16, lv_color_white(), "Anunciando…");
-    lv_obj_align(lbl_ble_estado, LV_ALIGN_TOP_LEFT, COL_X, 220);
+    lv_obj_align(lbl_ble_estado, LV_ALIGN_TOP_LEFT, COL_X, 246);
     lbl_ble_dir = etiqueta(scr_ajustes, F16, GRIS(), "Dirección: --");
-    lv_obj_align(lbl_ble_dir, LV_ALIGN_TOP_LEFT, COL_X, 246);
+    lv_obj_align(lbl_ble_dir, LV_ALIGN_TOP_LEFT, COL_X, 270);
     lbl_ble_bond = etiqueta(scr_ajustes, F16, GRIS(), "Emparejamiento guardado: no");
-    lv_obj_align(lbl_ble_bond, LV_ALIGN_TOP_LEFT, COL_X, 272);
+    lv_obj_align(lbl_ble_bond, LV_ALIGN_TOP_LEFT, COL_X, 294);
 
     lv_obj_t *olvidar = boton(scr_ajustes, "Olvidar iPhone", 0x7a1c1c, al_pulsar_olvidar);
     lv_obj_set_width(olvidar, 300);
-    lv_obj_align(olvidar, LV_ALIGN_TOP_LEFT, COL_X, 306);
+    lv_obj_align(olvidar, LV_ALIGN_TOP_LEFT, COL_X, 326);
     btn_olvidar_lbl = lv_obj_get_child(olvidar, 0);
-    l = etiqueta(scr_ajustes, F16, GRIS(), "(en el iPhone: Ajustes > Bluetooth > Omitir)");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 352);
 
     l = etiqueta(scr_ajustes, F20, lv_color_white(), "Acerca de");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 400);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, COL_X, 398);
     lbl_acerca = etiqueta(scr_ajustes, F16, GRIS(), "");
-    lv_obj_align(lbl_acerca, LV_ALIGN_TOP_LEFT, COL_X, 434);
+    lv_obj_align(lbl_acerca, LV_ALIGN_TOP_LEFT, COL_X, 430);
     lv_obj_t *pie = etiqueta(scr_ajustes, F16, GRIS(), "Desliza hacia abajo: reloj");
     lv_obj_align(pie, LV_ALIGN_BOTTOM_MID, 0, -14);
 }
@@ -515,6 +531,7 @@ static const char *icono_bateria(int pct)
 }
 
 static ble_estado_t ble_actual = BLE_ANUNCIANDO;
+static void refrescar_pie(void);
 static int bat_pct = -1;
 static bool bat_cargando, bat_usb, red_ok;
 static char red_ip_txt[16] = "--";
@@ -562,9 +579,29 @@ void ui_ble(ble_estado_t estado, bool tiene_bond, const char *direccion)
     snprintf(buf, sizeof(buf), "Dirección: %s", direccion);
     lv_label_set_text(lbl_ble_dir, buf);
     lv_label_set_text(lbl_ble_bond, tiene_bond ? "Emparejamiento guardado: sí" : "Emparejamiento guardado: no");
-    lv_label_set_text(lbl_pie, estado == BLE_VINCULADO ? "Abajo: notificaciones · arriba: ajustes"
+    refrescar_pie();
+}
+
+static void refrescar_pie(void)
+{
+    lv_label_set_text(lbl_pie, vigilia_on ? "Di \"Oye Andia\" · abajo: notificaciones"
+                               : ble_actual == BLE_VINCULADO ? "Abajo: notificaciones · arriba: ajustes"
                                : "Sin iPhone · abajo: ajustes");
 }
+
+void ui_vigilia(bool activa)
+{
+    vigilia_on = activa;
+    if (activa) {
+        lv_obj_add_state(sw_vigilia, LV_STATE_CHECKED);
+    } else {
+        lv_obj_remove_state(sw_vigilia, LV_STATE_CHECKED);
+    }
+    refrescar_pie();
+}
+
+void ui_al_vigilia(ui_cb_bool_t cb) { cb_vigilia = cb; }
+bool ui_en_andia(void) { return lv_screen_active() == scr_andia; }
 
 void ui_ram(unsigned kb)
 {

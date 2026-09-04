@@ -98,6 +98,15 @@ static void cb_cancelar_andia(void)
     andia_cancelar();
 }
 
+// "Oye Andia" siempre: el micrófono vigila en local y solo manda audio cuando hay voz cerca.
+static bool vigilia_deseada = true;
+
+static void cb_vigilia(bool activa)
+{
+    vigilia_deseada = activa;
+    andia_vigilia(activa);
+}
+
 static void pitidos(int n)
 {
     // Tono de 880 Hz, 120 ms, repetido n veces con pausas; va directo al anillo de reproducción.
@@ -149,14 +158,24 @@ static void evento_andia(const andia_evento_t *ev)
         pantalla_lock(0);
         ui_red(ev->red_conectada, red_ip());
         pantalla_unlock();
+        if (ev->red_conectada && vigilia_deseada) {
+            andia_vigilia(true);
+        }
         break;
     case ANDIA_EV_ESTADO:
         if (ev->estado != ANDIA_INACTIVA) {
             encender_pantalla();
         }
         pantalla_lock(0);
+        if (ev->estado == ANDIA_ACTIVADA && !ui_en_andia()) {
+            ui_ir_andia();   // la Pi confirmó "Oye Andia" desde la vigilia
+        }
         ui_andia_estado(ev->estado);
         pantalla_unlock();
+        break;
+    case ANDIA_EV_SIGUE:
+        pitidos(1);
+        encender_pantalla();
         break;
     case ANDIA_EV_PREGUNTA:
         pantalla_lock(0);
@@ -172,7 +191,7 @@ static void evento_andia(const andia_evento_t *ev)
     case ANDIA_EV_FIN:
         pantalla_lock(0);
         ui_andia_estado(ANDIA_INACTIVA);
-        if (strcmp(ev->texto, "sin_activacion") == 0) {
+        if (strcmp(ev->texto, "sin_activacion") == 0 && ui_en_andia()) {
             ui_andia_error("No escuché mi nombre.");
         } else if (strcmp(ev->texto, "sin_voz") == 0) {
             ui_andia_error("No escuché nada.");
@@ -328,6 +347,8 @@ void app_main(void)
     ui_al_llamada(cb_llamada);
     ui_al_microfono(cb_microfono);
     ui_al_cancelar_andia(cb_cancelar_andia);
+    ui_al_vigilia(cb_vigilia);
+    ui_vigilia(vigilia_deseada);
     pantalla_unlock();
     refrescar_bateria();
     log_ram("con la UI creada");

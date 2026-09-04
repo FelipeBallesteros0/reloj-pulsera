@@ -14,6 +14,7 @@ extern "C" {
 
 typedef void (*ui_cb_t)(void);
 typedef void (*ui_cb_int_t)(int);
+typedef void (*ui_cb_bool_t)(bool);
 typedef void (*ui_cb_uid_t)(uint32_t uid);
 typedef void (*ui_cb_llamada_t)(uint32_t uid, bool contestar);
 
@@ -38,6 +39,9 @@ void ui_andia_error(const char *t);
 void ui_ir_andia(void);
 void ui_al_microfono(ui_cb_t cb);          // botón de micrófono (carátula y pantalla ANDIA)
 void ui_al_cancelar_andia(ui_cb_t cb);
+void ui_al_vigilia(ui_cb_bool_t cb);        // interruptor "Oye Andia siempre" en Ajustes
+void ui_vigilia(bool activa);               // refleja el ajuste (interruptor y pie de la carátula)
+bool ui_en_andia(void);
 
 // Navegación
 void ui_ir_reloj(void);
