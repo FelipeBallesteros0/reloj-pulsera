@@ -133,6 +133,13 @@ __pycache__/
 
 `~/andia/andia/__init__.py`: vacío.
 
+`~/andia/pytest.ini` (sin esto pytest no encuentra el paquete `andia` desde `pruebas/`):
+```
+[pytest]
+pythonpath = .
+testpaths = pruebas
+```
+
 `~/andia/README.md` (primera versión; se completa en la Task 12):
 ```markdown
 # ANDIA — asistente de voz
@@ -425,7 +432,8 @@ Expected: `5 passed`.
 - [ ] **Step 5: Comprobar que Porcupine y el VAD reales se importan en WSL** (sin clave todavía)
 
 Run: `python -c "import pvporcupine, webrtcvad, os; print(pvporcupine.LIBRARY_PATH); import glob; print(glob.glob(os.path.join(os.path.dirname(pvporcupine.__file__), 'lib', 'common', '*es*.pv')))"`
-Expected: imprime la ruta de la biblioteca y una lista con `porcupine_params_es.pv` (el modelo en español viene en el paquete). Si la lista está vacía, descargar `porcupine_params_es.pv` de `https://github.com/Picovoice/porcupine/tree/master/lib/common` a `~/andia/palabras/` y usar esa ruta en `crear_porcupine`.
+Expected: el paquete pip solo trae `porcupine_params.pv` (inglés). Descargar el modelo en español a `~/andia/palabras/`
+(el servidor lo busca ahí primero): `curl -sSL -o ~/andia/palabras/porcupine_params_es.pv https://github.com/Picovoice/porcupine/raw/master/lib/common/porcupine_params_es.pv`.
 
 - [ ] **Step 6: Commit**
 
