@@ -251,7 +251,7 @@ void app_main(void)
         // Traza de calibración del táctil: coordenadas mientras hay un dedo apoyado (cada 250 ms).
         int tx, ty;
         if (pantalla_punto_tocado(&tx, &ty)) {
-            ESP_LOGI(TAG, "toque en (%d, %d)", tx, ty);
+            ESP_LOGD(TAG, "toque en (%d, %d)", tx, ty);
         }
 
         // Reloj y batería.

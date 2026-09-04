@@ -27,6 +27,18 @@ Apple; le pasa a todos los relojes caseros). El emparejamiento inicial se hace d
 
 Para desemparejar: en el reloj, Ajustes → "Olvidar iPhone"; en el iPhone, Ajustes → Bluetooth → "Omitir dispositivo".
 
+## Uso del reloj
+
+- Carátula: hora, fecha, Bluetooth y batería. **Deslizar hacia abajo → notificaciones; hacia arriba → ajustes** (como en el teléfono).
+- Notificaciones: tarjeta emergente 6 s al llegar (tocarla abre el detalle); en el detalle, **Descartar** la borra también
+  del iPhone. Llamada entrante: pantalla propia con Contestar/Rechazar.
+- Ajustes: brillo, estado Bluetooth, "Olvidar iPhone" (pide un segundo toque), versión y RAM libre.
+- Botón PWR: corto = pantalla on/off; 4 s = apagar el reloj. La pantalla se apaga sola a los 20 s sin tocar.
+
+Estado (2026-09-03): **F0, F1 y F2 completas y probadas con el iPhone** (vinculación, hora, notificaciones con acentos y
+emojis, descartar). Pendiente: probar llamada entrante, ráfagas de notificaciones y modos de Concentración; F3 (asistente)
+por decidir; F4 (autonomía).
+
 ## Compilar y flashear
 
 Flujo por defecto: **compilar en WSL, flashear y leer la consola desde Windows** (esptool nativo en COM3).

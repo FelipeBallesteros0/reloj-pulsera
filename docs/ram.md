@@ -12,3 +12,4 @@ sitio a WiFi/audio en F3.
 Referencia: el firmware de fábrica (brookesia phone demo, IDF 5.5.1) arranca con 412 KiB de heap porque no reserva
 IRAM para nuestra configuración (`CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM` y optimización -O2 no cambian esto; revisar si
 hace falta apurar).
+| 2026-09-03 | 3668523 | F2 completa, vinculado y suscrito a ANCS, 2 notificaciones | ~166 000 B | ~147 000 B | tras NimBLE sin conexión: 188 KB; la conexión + cliente GATT cuestan ~22 KB; fuente emoji va en flash |

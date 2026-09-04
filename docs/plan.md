@@ -1,5 +1,9 @@
 # Plan: firmware propio para el reloj ESP32-C6-Touch-AMOLED-2.06
 
+> **Estado 2026-09-03:** F0, F1 y F2 completas y verificadas en hardware con el iPhone. Desvíos respecto del plan:
+> iOS ya no lista periféricos genéricos en Ajustes (emparejamiento inicial vía nRF Connect); flasheo/consola desde
+> Windows por atascos de usbip; gestos con la convención del teléfono; fuente de emojis Noto como respaldo.
+
 ## Contexto
 
 Felipe compró el reloj de desarrollo Waveshare **ESP32-C6-Touch-AMOLED-2.06** y quiere un firmware
