@@ -86,6 +86,11 @@ static void tarea_voz(void *p)
             size_t n = anillo_leer(&anillo, (uint8_t *)buf, sizeof(buf));   // 1024 B = 32 ms por escritura
             if (n == 0) {
                 if (fin_audio) {
+                    // Cola de silencio: si no, el DMA del I2S repite el último búfer de voz hasta la próxima escritura.
+                    memset(buf, 0, sizeof(buf));
+                    for (int k = 0; k < 4; k++) {
+                        esp_codec_dev_write(alt, buf, sizeof(buf));
+                    }
                     reproduciendo = false;
                     tocando = false;
                     tramas_a_descartar = TRAMAS_TRAS_REPRODUCIR;
