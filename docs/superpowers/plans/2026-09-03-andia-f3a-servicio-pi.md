@@ -505,7 +505,7 @@ MINIMO_MS = 300
 
 def _cliente_real(clave: str):
     from openai import OpenAI
-    return OpenAI(api_key=clave)
+    return OpenAI(api_key=clave, timeout=20.0, max_retries=1)   # la spec: nunca quedarse en "pensando"
 
 
 def transcribir_openai(wav: bytes, clave: str, modelo: str = MODELO, cliente=None) -> str:
@@ -1202,7 +1202,7 @@ class Cerebro:
 def crear_pedir_deepseek(clave: str, modelo: str, esquemas: list):
     """Cableado real: DeepSeek por su API compatible con OpenAI, sin 'thinking' (consume max_tokens y llega vacío)."""
     from openai import OpenAI
-    cliente = OpenAI(api_key=clave, base_url="https://api.deepseek.com")
+    cliente = OpenAI(api_key=clave, base_url="https://api.deepseek.com", timeout=20.0, max_retries=1)
 
     def pedir(mensajes: list[dict]):
         r = cliente.chat.completions.create(
