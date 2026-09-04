@@ -17,10 +17,10 @@ static volatile bool capturando, reproduciendo, fin_audio, tocando;
 static int tramas_a_descartar;             // tras reproducir, el DMA del micrófono trae lo acumulado (incluido el altavoz)
 static struct { int huecos, escrituras; int64_t inicio_us; } rep;   // diagnóstico de la reproducción
 #define TRAMAS_TRAS_REPRODUCIR 8            // ~256 ms
-static uint8_t mem_anillo[12 * 1024];      // 375 ms de audio mono (la reserva es de 200 ms)
+static uint8_t mem_anillo[16 * 1024];      // 500 ms de audio mono (la reserva es de 400 ms)
 static anillo_t anillo;
 static TaskHandle_t tarea;
-#define RESERVA (VOZ_TASA * 2 * 200 / 1000)
+#define RESERVA (VOZ_TASA * 2 * 400 / 1000)
 #define TRAMAS_POR_INFORME 32              // ~1 s de captura entre líneas de diagnóstico
 
 esp_err_t voz_init(void)

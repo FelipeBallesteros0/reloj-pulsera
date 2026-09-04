@@ -54,6 +54,7 @@ static int fallos_seguidos;               // "sin_activacion" seguidos: con 3, p
 static esp_timer_handle_t timer_sigue;
 
 static void al_capturar(const uint8_t *pcm, size_t n);
+static const char *bajada_para_ahora(void);
 
 static void vaciar_cola(void)
 {
@@ -257,7 +258,7 @@ static void procesar_mensaje(const char *json)
 static void alimentar_audio(const uint8_t *datos, size_t n)
 {
     // La Pi manda el audio más rápido que el tiempo real: si el anillo está lleno, esperar un poco.
-    for (int intento = 0; n > 0 && intento < 200; intento++) {   // hasta 1 s: el anillo es de 375 ms
+    for (int intento = 0; n > 0 && intento < 200; intento++) {   // hasta 1 s: el anillo es de 500 ms
         size_t cupo = voz_reproducir_alimentar(datos, n);
         datos += cupo;
         n -= cupo;
@@ -442,11 +443,21 @@ static void detectar_voz(const int16_t *pcm, size_t muestras)
     memset(&envio, 0, sizeof(envio));
     en_gesto = true;
     armar_vigilante();
-    enviar_json("{\"t\":\"inicio\",\"modo\":\"gesto\"}");
+    char inicio[80];
+    snprintf(inicio, sizeof(inicio), "{\"t\":\"inicio\",\"modo\":\"gesto\",\"bajada\":\"%s\"}", bajada_para_ahora());
+    enviar_json(inicio);
     enviando = true;                           // la cola ya tiene los últimos 640 ms: salen primero
     if (tarea_envio) {
         xTaskNotifyGive(tarea_envio);
     }
+}
+
+// Formato de la voz de vuelta para esta conversación: PCM limpio si vamos por la LAN con buena señal; si no,
+// ADPCM (4 veces menos datos: con -80 dBm el PCM llegaba a trompicones).
+static const char *bajada_para_ahora(void)
+{
+    bajada_adpcm = !(cliente_lan && red_rssi() > -70);
+    return bajada_adpcm ? "adpcm" : "pcm";
 }
 
 // Desde la tarea de voz, una trama de 1024 B (32 ms) cada vez: codificar y encolar, sin tocar la red.
@@ -651,7 +662,10 @@ esp_err_t andia_conversar(bool gesto)
         red_ahorro(true);
         return ESP_FAIL;
     }
-    enviar_json(gesto ? "{\"t\":\"inicio\",\"modo\":\"gesto\"}" : "{\"t\":\"inicio\",\"modo\":\"boton\"}");
+    char inicio[80];
+    snprintf(inicio, sizeof(inicio), "{\"t\":\"inicio\",\"modo\":\"%s\",\"bajada\":\"%s\"}", gesto ? "gesto" : "boton",
+             bajada_para_ahora());
+    enviar_json(inicio);
     memset(&envio, 0, sizeof(envio));
     en_gesto = gesto;
     poner_estado(ANDIA_ESCUCHANDO);
