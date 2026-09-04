@@ -13,7 +13,9 @@
 > una sesión en modo gesto con 640 ms de audio previo; la Pi confirma el nombre (activación textual), "sigue" si
 > solo se dijo el nombre, límite de transcripciones por ventana. Verificado sin tocar el reloj. Sustituye al gesto de
 > muñeca previsto en F3c (queda como opción de ahorro para F4). Riesgo abierto: el hotspot cambia de IP celular y
-> corta la conexión; en casa convendría `ws://` por LAN sin TLS (pendiente el WiFi de la casa).
+> corta la conexión. **En casa (RELOJ_WIFI1, 2,4 GHz) el reloj usa `ws://192.168.x.x:8001/ws` por la LAN sin TLS**
+> (2026-09-04 11:00): conecta en 6 s tras arrancar, 46 KB libres con la conexión abierta, y sin cortes; fuera de casa
+> sigue el túnel `wss://` y el cliente se recrea al cambiar de red.
 
 ## Contexto
 

@@ -34,3 +34,4 @@ mensajes en vuelo. Con 2880 B iba justo al tiempo real (1-2 tramas descartadas p
 bajó de 210 ms a **14 ms** por mensaje (155 tramas en 148 mensajes, máx 103 ms, 0 descartadas).
 | 2026-09-04 | 7399724 | vigilia: TLS permanente + captura continua, en reposo | ~38 000 B | ~18 400 B | tras la 2.ª dieta: LVGL 12 líneas, NimBLE 12 ACL, WiFi 6/6, TLS OUT 1024, TCP SND 4320, WS 1024 |
 | 2026-09-04 | 7399724 | vigilia: en conversación | ~28 000 B | ~14 600 B | antes de la 2.ª dieta `esp-aes: Failed to allocate memory` cortaba envíos con 27 KB libres |
+| 2026-09-04 | 5c82443 | en casa: ws:// por la LAN (sin TLS), vigilia y conexión abierta | ~46 000 B | ~31 000 B | el TLS del túnel costaba ~8 KB más en reposo y fragmentaba el heap |
