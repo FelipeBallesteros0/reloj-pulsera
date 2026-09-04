@@ -324,6 +324,8 @@ esp_err_t andia_init(QueueHandle_t q)
     ESP_RETURN_ON_ERROR(esp_transport_ws_set_config(transporte, &cfg_ws), TAG, "config WS");
     esp_websocket_client_config_t cfg = {
         .uri = CONFIG_RELOJ_ANDIA_URL,
+        // Con transporte externo el cliente no deduce el puerto del esquema (intentaba host:0).
+        .port = strncmp(CONFIG_RELOJ_ANDIA_URL, "wss://", 6) == 0 ? 443 : 80,
         .ext_transport = transporte,
         .buffer_size = 1536,      // los bloques de audio (1604 B) pueden llegar en dos fragmentos y se manejan
         .reconnect_timeout_ms = 5000,
