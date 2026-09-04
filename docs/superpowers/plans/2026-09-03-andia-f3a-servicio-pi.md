@@ -593,7 +593,7 @@ from andia import texto, tts
 
 
 def test_limpiar_para_voz_quita_markdown_y_emojis():
-    assert texto.limpiar_para_voz("**Hola** 😀 - lista\n  ok") == "Hola lista ok"
+    assert texto.limpiar_para_voz("**Hola** 😀\n- lista\n  ok") == "Hola lista ok"   # viñeta a inicio de línea
 
 
 def test_construir_peticion_usa_mayuri_y_etiquetas():
