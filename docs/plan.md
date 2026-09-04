@@ -15,7 +15,8 @@
 > muñeca previsto en F3c (queda como opción de ahorro para F4). Riesgo abierto: el hotspot cambia de IP celular y
 > corta la conexión. **En casa (RELOJ_WIFI1, 2,4 GHz) el reloj usa `ws://192.168.x.x:8001/ws` por la LAN sin TLS**
 > (2026-09-04 11:00): conecta en 6 s tras arrancar, 46 KB libres con la conexión abierta, y sin cortes; fuera de casa
-> sigue el túnel `wss://` y el cliente se recrea al cambiar de red.
+> sigue el túnel `wss://` y el cliente se recrea al cambiar de red. Por la LAN la voz de vuelta va en PCM (el ADPCM
+> se oía con siseo); por el túnel sigue en ADPCM. Verificado por Felipe: "se oye bien".
 
 ## Contexto
 
