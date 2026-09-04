@@ -2122,7 +2122,7 @@ chmod +x ~/andia/deploy.sh
 ssh -t felipe@192.168.x.x 'mkdir -p ~/andia && nano ~/andia/.env'
 # Copiar los .ppn:
 rsync -av ~/andia/palabras/ felipe@192.168.x.x:~/andia/palabras/
-~/andia/deploy.sh --instalar
+~/andia/deploy.sh --instalar   # incluye la regla ufw: la Pi tiene INPUT DROP y solo abre lo que se le dice
 ```
 Expected: `/salud` → `{"ok": true, "relojes": 0}`; el journal muestra `[andia] frases de activación: [...]` y `Uvicorn running on http://0.0.0.0:8001`. Si `webrtcvad-wheels` no trae rueda aarch64 para Python 3.12: `ssh felipe@192.168.x.x 'cd ~/andia && venv/bin/pip install webrtcvad'` (compila con `python3-dev` y `build-essential`, que se instalan con apt).
 
