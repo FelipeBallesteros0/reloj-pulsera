@@ -54,7 +54,7 @@ esp_err_t voz_capturar_iniciar(void (*cb)(const uint8_t *, size_t))
     }
     cb_captura = cb;
     capturando = true;
-    return xTaskCreate(tarea_captura, "voz_cap", 3072, NULL, 5, NULL) == pdPASS ? ESP_OK : ESP_FAIL;
+    return xTaskCreate(tarea_captura, "voz_cap", 3584, NULL, 5, NULL) == pdPASS ? ESP_OK : ESP_FAIL;
 }
 
 void voz_capturar_detener(void) { capturando = false; }

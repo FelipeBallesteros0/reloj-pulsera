@@ -10,6 +10,7 @@
 #include "esp_crt_bundle.h"
 #include "cJSON.h"
 #include "voz.h"
+#include "adpcm.h"
 #include "red.h"
 #include "sdkconfig.h"
 
@@ -22,6 +23,8 @@ static char acum[1024];                   // mensajes de texto que llegan fragme
 static size_t acum_len;
 static esp_timer_handle_t timer_vigilante, timer_ping;
 static char id_reloj[13];
+static bool con_adpcm;                    // el servidor aceptó audio comprimido 4:1 en ambos sentidos
+static adpcm_estado_t codificador, decodificador;
 
 // ---------------------------------------------------------------- utilidades
 
@@ -94,8 +97,10 @@ static void procesar_mensaje(const char *json)
     const char *txt = cJSON_IsString(texto) ? texto->valuestring : "";
 
     if (strcmp(tipo, "hola") == 0) {
+        const cJSON *audio = cJSON_GetObjectItem(m, "audio");
+        con_adpcm = cJSON_IsString(audio) && strcmp(audio->valuestring, "adpcm") == 0;
         saludado = true;
-        ESP_LOGI(TAG, "servidor listo");
+        ESP_LOGI(TAG, "servidor listo (audio %s)", con_adpcm ? "adpcm" : "pcm");
     } else if (strcmp(tipo, "activada") == 0) {
         poner_estado(ANDIA_ACTIVADA);
     } else if (strcmp(tipo, "pensando") == 0) {
@@ -141,13 +146,39 @@ static void alimentar_audio(const uint8_t *datos, size_t n)
     }
 }
 
+// Un mensaje binario = un bloque ADPCM (cabecera + nibbles). Puede llegar en varios fragmentos: la cabecera
+// viene en el primero y el estado del decodificador continúa en los siguientes.
+static void recibir_audio(const uint8_t *d, size_t n, size_t offset)
+{
+    if (!con_adpcm) {
+        alimentar_audio(d, n);
+        return;
+    }
+    if (offset == 0) {
+        if (n < ADPCM_CABECERA) {
+            return;
+        }
+        adpcm_leer_cabecera(&decodificador, d);
+        d += ADPCM_CABECERA;
+        n -= ADPCM_CABECERA;
+    }
+    int16_t pcm[128];
+    while (n > 0) {
+        size_t trozo = n < sizeof(pcm) / 4 ? n : sizeof(pcm) / 4;
+        size_t m = adpcm_decodificar(&decodificador, d, trozo, pcm);
+        alimentar_audio((const uint8_t *)pcm, m * sizeof(int16_t));
+        d += trozo;
+        n -= trozo;
+    }
+}
+
 static void al_evento_ws(void *arg, esp_event_base_t base, int32_t id, void *datos)
 {
     esp_websocket_event_data_t *e = datos;
     switch (id) {
     case WEBSOCKET_EVENT_CONNECTED: {
         char hola[160];
-        snprintf(hola, sizeof(hola), "{\"t\":\"hola\",\"token\":\"%s\",\"reloj\":\"%s\",\"v\":1}",
+        snprintf(hola, sizeof(hola), "{\"t\":\"hola\",\"token\":\"%s\",\"reloj\":\"%s\",\"v\":1,\"audio\":\"adpcm\"}",
                  CONFIG_RELOJ_ANDIA_TOKEN, id_reloj);
         esp_websocket_client_send_text(ws, hola, strlen(hola), pdMS_TO_TICKS(1000));
         ESP_LOGI(TAG, "WebSocket conectado");
@@ -163,8 +194,8 @@ static void al_evento_ws(void *arg, esp_event_base_t base, int32_t id, void *dat
         ESP_LOGW(TAG, "WebSocket desconectado");
         break;
     case WEBSOCKET_EVENT_DATA:
-        if (e->op_code == 0x2) {                       // binario: audio PCM (puede venir fragmentado)
-            alimentar_audio((const uint8_t *)e->data_ptr, e->data_len);
+        if (e->op_code == 0x2) {                       // binario: audio (puede venir fragmentado)
+            recibir_audio((const uint8_t *)e->data_ptr, e->data_len, e->payload_offset);
         } else if (e->op_code == 0x1) {                // texto: JSON, quizá en varios fragmentos
             if (e->payload_offset == 0) {
                 acum_len = 0;
@@ -191,11 +222,22 @@ static void al_evento_ws(void *arg, esp_event_base_t base, int32_t id, void *dat
 
 static void al_capturar(const uint8_t *pcm, size_t n)
 {
-    if (ws && esp_websocket_client_is_connected(ws)) {
-        int r = esp_websocket_client_send_bin(ws, (const char *)pcm, n, pdMS_TO_TICKS(500));
-        if (r < 0) {
-            ESP_LOGW(TAG, "trama de audio no enviada");
+    if (!ws || !esp_websocket_client_is_connected(ws)) {
+        return;
+    }
+    const char *datos = (const char *)pcm;
+    uint8_t bloque[ADPCM_CABECERA + VOZ_TRAMA_BYTES / 4];
+    if (con_adpcm) {
+        if (n > VOZ_TRAMA_BYTES) {
+            n = VOZ_TRAMA_BYTES;
         }
+        n = adpcm_codificar_bloque(&codificador, (const int16_t *)pcm, n / 2, bloque);
+        datos = (const char *)bloque;
+    }
+    // Un corte de red más largo que este plazo aborta la conexión (así lo hace el cliente); 4:1 deja margen.
+    int r = esp_websocket_client_send_bin(ws, datos, n, pdMS_TO_TICKS(1500));
+    if (r < 0) {
+        ESP_LOGW(TAG, "trama de audio no enviada");
     }
 }
 
@@ -280,6 +322,7 @@ esp_err_t andia_conversar(bool gesto)
         return ESP_FAIL;
     }
     enviar_json(gesto ? "{\"t\":\"inicio\",\"modo\":\"gesto\"}" : "{\"t\":\"inicio\",\"modo\":\"boton\"}");
+    codificador = (adpcm_estado_t){ 0 };
     poner_estado(ANDIA_ESCUCHANDO);
     esp_timer_stop(timer_vigilante);
     esp_timer_start_once(timer_vigilante, 25 * 1000000ULL);

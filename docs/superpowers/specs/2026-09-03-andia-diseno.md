@@ -52,7 +52,12 @@ Sin cambios en la parte BLE/ANCS: coexisten (NimBLE + WiFi en el C6; ver riesgos
 
 ## 5. Protocolo WebSocket (v1)
 
-- Texto = JSON con campo `t`. Binario = PCM 16 kHz s16le mono. Un mensaje `{"t":"hola","token":...,"reloj":"98A316A5745E","v":1}` abre la sesión.
+- Texto = JSON con campo `t`. Binario = audio 16 kHz mono: PCM s16le por defecto, o bloques **IMA ADPCM 4:1**
+  (cabecera de 4 B: predictor int16 LE, índice de paso, 0; luego un nibble por muestra, el bajo primero; cada bloque se
+  decodifica solo) si el `hola` trae `"audio":"adpcm"` y la Pi lo confirma en su `hola` (`"audio":"adpcm"|"pcm"`). Un
+  mensaje `{"t":"hola","token":...,"reloj":"98A316A5745E","v":1,"audio":"adpcm"}` abre la sesión. *(Cambio del
+  2026-09-04: por el túnel de Cloudflare el PCM crudo no cabía en las ventanas TCP del reloj y los registros TLS de 16 KB
+  no cabían en su RAM; la Pi además espacia los trozos de respuesta a 2× tiempo real.)*
 - Reloj → Pi: `hola`, `inicio`, audio, `cancelar` (toque en pantalla), `ping`.
 - Pi → Reloj: `activada`, `pensando`, `pregunta`, `respuesta`, audio, `fin`, `error`, `aviso` (mensaje empujado por la
   Pi: recordatorio, "terminó la compilación", alerta), `pong`.

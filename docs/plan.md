@@ -5,7 +5,9 @@
 > Windows por atascos de usbip; gestos con la convención del teléfono; fuente de emojis Noto como respaldo.
 > **F3a (servicio ANDIA en la Pi) completa el 2026-09-03 23:30**: repo `~/andia` (main), servicio `andia` en
 > coramohost:8001, probado con el PC como reloj falso (voz Mayuri, activación "Oye Andia" sobre el texto, temporizador,
-> recordatorio → aviso). Sigue **F3b**: cliente de audio en el reloj (WiFi + WebSocket + mic/altavoz).
+> recordatorio → aviso). **F3b** (cliente de audio en el reloj: `reloj_red`, `reloj_voz`, `reloj_andia`) y **F3e**
+> (túnel `wss://andia.example.com/ws` por Cloudflare, TLS 1.2, audio IMA ADPCM 4:1 en ambos sentidos) implementados
+> el 2026-09-04; conversación completa verificada desde el PC por el túnel; pendiente verificarla en el reloj físico.
 
 ## Contexto
 
