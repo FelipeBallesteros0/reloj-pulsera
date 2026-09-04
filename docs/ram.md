@@ -30,4 +30,5 @@ Subida de audio por el hotspot (medido): cada mensaje WebSocket cuesta ~210 ms s
 más el ACK retrasado del otro extremo), así que con una trama por mensaje solo salía 1 de cada 6 tramas (el DMA
 descartaba el resto mientras la captura esperaba). Solución: cola de bloques + tarea de envío que junta hasta 7 bloques
 (224 ms) por mensaje, TCP_NODELAY, WiFi sin ahorro durante la conversación y ventanas TCP de 5760 B para tener dos
-mensajes en vuelo. Con 2880 B iba justo al tiempo real (1-2 tramas descartadas por frase).
+mensajes en vuelo. Con 2880 B iba justo al tiempo real (1-2 tramas descartadas por frase); con 5760 B el envío medio
+bajó de 210 ms a **14 ms** por mensaje (155 tramas en 148 mensajes, máx 103 ms, 0 descartadas).

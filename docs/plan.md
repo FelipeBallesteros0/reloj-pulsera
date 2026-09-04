@@ -7,7 +7,8 @@
 > coramohost:8001, probado con el PC como reloj falso (voz Mayuri, activación "Oye Andia" sobre el texto, temporizador,
 > recordatorio → aviso). **F3b** (cliente de audio en el reloj: `reloj_red`, `reloj_voz`, `reloj_andia`) y **F3e**
 > (túnel `wss://andia.example.com/ws` por Cloudflare, TLS 1.2, audio IMA ADPCM 4:1 en ambos sentidos) implementados
-> el 2026-09-04; conversación completa verificada desde el PC por el túnel; pendiente verificarla en el reloj físico.
+> el 2026-09-04 y **verificados en el reloj físico por el hotspot** (hora, clima, temporizador, aviso empujado desde el
+> PC). Subida de audio: cola de bloques + tarea de envío, TCP_NODELAY y ventanas TCP de 5760 B (ver `docs/ram.md`).
 
 ## Contexto
 
