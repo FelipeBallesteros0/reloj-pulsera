@@ -4,6 +4,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_check.h"
+#include "esp_timer.h"
 #include "esp_codec_dev.h"
 #include "bsp/esp-bsp.h"
 #include "anillo.h"
@@ -17,7 +18,7 @@ static uint8_t mem_anillo[12 * 1024];      // 375 ms de audio mono (la reserva e
 static anillo_t anillo;
 static TaskHandle_t tarea;
 #define RESERVA (VOZ_TASA * 2 * 200 / 1000)
-#define TRAMAS_POR_INFORME 64              // ~2 s de captura entre líneas de diagnóstico
+#define TRAMAS_POR_INFORME 32              // ~1 s de captura entre líneas de diagnóstico
 
 esp_err_t voz_init(void)
 {
@@ -38,20 +39,26 @@ esp_err_t voz_init(void)
     return ESP_OK;
 }
 
-// Diagnóstico de la captura: cada ~2 s, el nivel máximo (0-32767) y cuántas tramas salieron.
-static void medir_nivel(const int16_t *pcm, size_t n)
+// Diagnóstico de la captura: cada ~1 s, nivel máximo (0-32767) y cuánto tardan la lectura del códec (debería
+// rondar los 32 ms de una trama) y la entrega al callback (la red).
+static void medir_nivel(const int16_t *pcm, size_t n, int64_t lectura_us, int64_t entrega_us)
 {
     static int nivel_max, tramas;
+    static int64_t lectura_total, entrega_total;
     for (size_t i = 0; i < n; i++) {
         int v = pcm[i] < 0 ? -pcm[i] : pcm[i];
         if (v > nivel_max) {
             nivel_max = v;
         }
     }
+    lectura_total += lectura_us;
+    entrega_total += entrega_us;
     if (++tramas >= TRAMAS_POR_INFORME) {
-        ESP_LOGI(TAG, "captura: %d tramas, nivel máx %d", tramas, nivel_max);
+        ESP_LOGI(TAG, "captura: %d tramas, nivel máx %d, lectura media %d ms, entrega media %d ms", tramas, nivel_max,
+                 (int)(lectura_total / tramas / 1000), (int)(entrega_total / tramas / 1000));
         tramas = 0;
         nivel_max = 0;
+        lectura_total = entrega_total = 0;
     }
 }
 
@@ -60,11 +67,13 @@ static void tarea_voz(void *p)
     static int16_t buf[512];
     for (;;) {
         if (capturando) {
+            int64_t t0 = esp_timer_get_time();
             if (esp_codec_dev_read(mic, buf, sizeof(buf)) == 0) {
-                medir_nivel(buf, 512);
+                int64_t t1 = esp_timer_get_time();
                 if (cb_captura && capturando) {
                     cb_captura((const uint8_t *)buf, sizeof(buf));
                 }
+                medir_nivel(buf, 512, t1 - t0, esp_timer_get_time() - t1);
             } else {
                 vTaskDelay(pdMS_TO_TICKS(10));
             }

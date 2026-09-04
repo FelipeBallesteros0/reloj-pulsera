@@ -29,7 +29,16 @@ static esp_timer_handle_t timer_vigilante, timer_ping;
 static char id_reloj[13];
 static bool con_adpcm;                    // el servidor aceptó audio comprimido 4:1 en ambos sentidos
 static adpcm_estado_t codificador, decodificador;
-static struct { int tramas, fallidas; int64_t total_us, max_us; } envio;   // diagnóstico de la subida de audio
+static struct { int tramas, mensajes, fallidas, descartadas; int64_t total_us, max_us; } envio;   // subida de audio
+
+// La captura no debe esperar a la red (perdería audio del DMA): encola bloques ADPCM y una tarea aparte los manda,
+// juntando los que haya pendientes (hasta 7 = 224 ms) en un solo mensaje.
+#define BLOQUE_BYTES   (ADPCM_CABECERA + VOZ_TRAMA_BYTES / 4)   // 260 B = 32 ms
+#define COLA_BLOQUES   12
+#define BLOQUES_POR_MENSAJE 7
+static uint8_t cola_audio[COLA_BLOQUES][BLOQUE_BYTES];
+static volatile uint8_t cola_in, cola_out;
+static TaskHandle_t tarea_envio;
 
 // ---------------------------------------------------------------- utilidades
 
@@ -87,13 +96,20 @@ static void armar_vigilante(void)
     esp_timer_start_once(timer_vigilante, 30 * 1000000ULL);
 }
 
+static void informar_envio(void)
+{
+    if (envio.tramas || envio.descartadas) {
+        ESP_LOGI(TAG, "audio: %d tramas en %d mensajes, envío medio %d ms, máx %d ms, descartadas %d, fallidas %d",
+                 envio.tramas, envio.mensajes, envio.mensajes ? (int)(envio.total_us / envio.mensajes / 1000) : 0,
+                 (int)(envio.max_us / 1000), envio.descartadas, envio.fallidas);
+        memset(&envio, 0, sizeof(envio));
+    }
+}
+
 static void terminar_conversacion(void)
 {
     red_ahorro(true);
-    if (envio.tramas) {
-        ESP_LOGI(TAG, "audio: %d tramas enviadas, %d fallidas, envío máx %d ms", envio.tramas, envio.fallidas,
-                 (int)(envio.max_us / 1000));
-    }
+    informar_envio();
     voz_capturar_detener();
     esp_timer_stop(timer_vigilante);
     poner_estado(ANDIA_INACTIVA);
@@ -124,6 +140,7 @@ static void procesar_mensaje(const char *json)
     } else if (strcmp(tipo, "pensando") == 0) {
         armar_vigilante();
         voz_capturar_detener();
+        informar_envio();
         poner_estado(ANDIA_PENSANDO);
     } else if (strcmp(tipo, "pregunta") == 0) {
         armar_vigilante();
@@ -140,6 +157,7 @@ static void procesar_mensaje(const char *json)
         const cJSON *motivo = cJSON_GetObjectItem(m, "motivo");
         voz_reproducir_fin();
         voz_capturar_detener();
+        informar_envio();
         esp_timer_stop(timer_vigilante);
         red_ahorro(true);
         publicar_texto(ANDIA_EV_FIN, cJSON_IsString(motivo) ? motivo->valuestring : "", NULL);
@@ -248,36 +266,64 @@ static void al_evento_ws(void *arg, esp_event_base_t base, int32_t id, void *dat
 
 // ---------------------------------------------------------------- captura → servidor
 
-static void al_capturar(const uint8_t *pcm, size_t n)
+static void enviar_audio(const uint8_t *datos, size_t n, int tramas)
 {
     if (!ws || !esp_websocket_client_is_connected(ws)) {
-        envio.fallidas++;
+        envio.fallidas += tramas;
         return;
     }
-    const char *datos = (const char *)pcm;
-    uint8_t bloque[ADPCM_CABECERA + VOZ_TRAMA_BYTES / 4];
-    if (con_adpcm) {
-        if (n > VOZ_TRAMA_BYTES) {
-            n = VOZ_TRAMA_BYTES;
-        }
-        n = adpcm_codificar_bloque(&codificador, (const int16_t *)pcm, n / 2, bloque);
-        datos = (const char *)bloque;
-    }
-    // Un corte de red más largo que este plazo aborta la conexión (así lo hace el cliente); 4:1 deja margen.
+    // Un corte de red más largo que este plazo aborta la conexión (así lo hace el cliente).
     int64_t t0 = esp_timer_get_time();
-    int r = esp_websocket_client_send_bin(ws, datos, n, pdMS_TO_TICKS(1500));
+    int r = esp_websocket_client_send_bin(ws, (const char *)datos, n, pdMS_TO_TICKS(3000));
     int64_t dt = esp_timer_get_time() - t0;
     envio.total_us += dt;
     if (dt > envio.max_us) {
         envio.max_us = dt;
     }
+    envio.mensajes++;
+    envio.tramas += tramas;
     if (r < 0) {
-        envio.fallidas++;
-        ESP_LOGW(TAG, "trama de audio no enviada");
+        envio.fallidas += tramas;
+        ESP_LOGW(TAG, "audio no enviado");
     }
-    if (++envio.tramas % 64 == 0) {
-        ESP_LOGI(TAG, "audio: %d tramas de %u B, envío medio %d ms, máx %d ms, fallidas %d", envio.tramas, (unsigned)n,
-                 (int)(envio.total_us / envio.tramas / 1000), (int)(envio.max_us / 1000), envio.fallidas);
+}
+
+static void tarea_enviar(void *arg)
+{
+    static uint8_t mensaje[BLOQUES_POR_MENSAJE * BLOQUE_BYTES];
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+        while (cola_out != cola_in) {
+            int k = 0;
+            while (cola_out != cola_in && k < BLOQUES_POR_MENSAJE) {
+                memcpy(mensaje + k * BLOQUE_BYTES, cola_audio[cola_out], BLOQUE_BYTES);
+                cola_out = (cola_out + 1) % COLA_BLOQUES;
+                k++;
+            }
+            enviar_audio(mensaje, k * BLOQUE_BYTES, k);
+        }
+    }
+}
+
+// Desde la tarea de voz, una trama de 1024 B (32 ms) cada vez: codificar y encolar, sin tocar la red.
+static void al_capturar(const uint8_t *pcm, size_t n)
+{
+    if (n > VOZ_TRAMA_BYTES) {
+        n = VOZ_TRAMA_BYTES;
+    }
+    if (!con_adpcm) {                       // servidor viejo: PCM crudo, directo
+        enviar_audio(pcm, n, 1);
+        return;
+    }
+    uint8_t siguiente = (cola_in + 1) % COLA_BLOQUES;
+    if (siguiente == cola_out) {
+        envio.descartadas++;                // la red no da abasto: se pierde la trama más nueva
+        return;
+    }
+    adpcm_codificar_bloque(&codificador, (const int16_t *)pcm, n / 2, cola_audio[cola_in]);
+    cola_in = siguiente;
+    if (tarea_envio) {
+        xTaskNotifyGive(tarea_envio);
     }
 }
 
@@ -327,7 +373,7 @@ esp_err_t andia_init(QueueHandle_t q)
         // Con transporte externo el cliente no deduce el puerto del esquema (intentaba host:0).
         .port = strncmp(CONFIG_RELOJ_ANDIA_URL, "wss://", 6) == 0 ? 443 : 80,
         .ext_transport = transporte,
-        .buffer_size = 1536,      // los bloques de audio (1604 B) pueden llegar en dos fragmentos y se manejan
+        .buffer_size = 2048,      // caben enteros un bloque de bajada (1604 B) y un mensaje de subida (1820 B)
         .reconnect_timeout_ms = 5000,
         .network_timeout_ms = 8000,
         .task_stack = 5120,       // con TLS (wss://) la tarea necesita algo más de pila
@@ -342,6 +388,8 @@ esp_err_t andia_init(QueueHandle_t q)
     esp_timer_create(&a1, &timer_vigilante);
     esp_timer_create(&a2, &timer_ping);
     esp_timer_start_periodic(timer_ping, 30 * 1000000ULL);
+    ESP_RETURN_ON_FALSE(xTaskCreate(tarea_enviar, "andia_tx", 3584, NULL, 5, &tarea_envio) == pdPASS, ESP_FAIL, TAG,
+                        "tarea de envío");
     return ESP_OK;
 }
 
@@ -383,6 +431,7 @@ esp_err_t andia_conversar(bool gesto)
     }
     enviar_json(gesto ? "{\"t\":\"inicio\",\"modo\":\"gesto\"}" : "{\"t\":\"inicio\",\"modo\":\"boton\"}");
     codificador = (adpcm_estado_t){ 0 };
+    cola_out = cola_in;                     // lo que quedara sin mandar de la conversación anterior ya no sirve
     memset(&envio, 0, sizeof(envio));
     poner_estado(ANDIA_ESCUCHANDO);
     armar_vigilante();
