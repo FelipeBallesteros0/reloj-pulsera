@@ -66,18 +66,9 @@ static void tarea_voz(void *p)
 {
     static int16_t buf[512];
     for (;;) {
-        if (capturando) {
-            int64_t t0 = esp_timer_get_time();
-            if (esp_codec_dev_read(mic, buf, sizeof(buf)) == 0) {
-                int64_t t1 = esp_timer_get_time();
-                if (cb_captura && capturando) {
-                    cb_captura((const uint8_t *)buf, sizeof(buf));
-                }
-                medir_nivel(buf, 512, t1 - t0, esp_timer_get_time() - t1);
-            } else {
-                vTaskDelay(pdMS_TO_TICKS(10));
-            }
-        } else if (reproduciendo) {
+        // La reproducción manda: en vigilia la captura no se detiene nunca y, si tuviera prioridad, la voz de
+        // ANDIA jamás sonaría. Mientras se toca, el micrófono pierde tramas (da igual: el detector está parado).
+        if (reproduciendo) {
             // Espera la reserva (o el fin, si la respuesta es más corta) antes de empezar a tocar.
             if (!tocando && anillo_ocupado(&anillo) < RESERVA && !fin_audio) {
                 vTaskDelay(pdMS_TO_TICKS(10));
@@ -95,6 +86,17 @@ static void tarea_voz(void *p)
                 continue;
             }
             esp_codec_dev_write(alt, buf, n);
+        } else if (capturando) {
+            int64_t t0 = esp_timer_get_time();
+            if (esp_codec_dev_read(mic, buf, sizeof(buf)) == 0) {
+                int64_t t1 = esp_timer_get_time();
+                if (cb_captura && capturando) {
+                    cb_captura((const uint8_t *)buf, sizeof(buf));
+                }
+                medir_nivel(buf, 512, t1 - t0, esp_timer_get_time() - t1);
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
         } else {
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
         }
