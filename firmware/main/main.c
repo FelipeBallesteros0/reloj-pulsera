@@ -187,14 +187,6 @@ static void pitidos(int n)
     voz_reproducir_fin();
 }
 
-// "Te oí": doble tono ascendente cuando la Pi reconoce el nombre.
-static void son_activacion(void)
-{
-    tono(880, 90);
-    tono(1320, 140);
-    voz_reproducir_fin();
-}
-
 static void aviso_local(const char *titulo, const char *mensaje, const char *origen)
 {
     uint32_t uid = uid_local++;
@@ -247,8 +239,8 @@ static void evento_andia(const andia_evento_t *ev)
         ui_andia_estado(ev->estado);
         pantalla_unlock();
         break;
-    case ANDIA_EV_SIGUE:            // la Pi reconoció el nombre: suena "te oí" (y quizá sigue escuchando)
-        son_activacion();
+    case ANDIA_EV_SIGUE:            // dijiste solo el nombre: pitido y a escuchar la pregunta
+        pitidos(1);
         encender_pantalla();
         break;
     case ANDIA_EV_PREGUNTA:
