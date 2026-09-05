@@ -34,8 +34,8 @@ Con la pantalla apagada, el firmware actual mantiene despierto casi todo:
 - WiFi conectado siempre (modem sleep mínimo a batería).
 - BLE sin sueño del controlador (`CONFIG_BT_LE_SLEEP_ENABLE` no está).
 - Giroscopio y acelerómetro a 125 Hz desde el arranque; solo los lee la app Sensores.
-- LVGL sigue activo: tick de 5 ms, sondeo del táctil por I²C cada 30 ms, redibujo de la hora cada segundo enviado
-  por QSPI a un panel que solo recibió DISPOFF (no SLPIN).
+- LVGL sigue activo: tick de 5 ms y redibujo de la hora cada segundo enviado por QSPI a un panel que solo recibió
+  DISPOFF (no SLPIN). El táctil ya se lee solo cuando salta su INT (el port de LVGL lo pone en modo evento), no por sondeo.
 - Ruta del altavoz abierta desde el arranque: ES8311, I²S de salida y amplificador NS4150B habilitado (GPIO6).
 - Rieles del AXP2101 sin tocar (los de fábrica).
 - Bucle principal cada 250 ms leyendo el PMIC por I²C (barato; el problema es que entre lecturas no duerme).
@@ -100,9 +100,10 @@ uint32_t energia_segundos_en_modo(void);
 - `red_encender()` / `red_apagar()` sobre `esp_wifi_start()` / `esp_wifi_stop()`; `esp_wifi_init` se hace una sola
   vez en `red_init`, que ya no arranca el WiFi por sí sola (lo decide el gestor).
 - Bandera `deseada`: el manejador de `WIFI_EVENT_STA_DISCONNECTED` no reintenta cuando el apagado fue nuestro.
-- ANDIA ya para su cliente WebSocket al recibir `ANDIA_EV_RED` con `red_conectada = false`, así que no queda ningún
-  temporizador de reconexión (5 s) despertando la CPU. Al encender, la secuencia es la de hoy: asociación, DHCP,
-  evento de red, y ANDIA abre el WebSocket.
+- Nuevo `andia_red(bool conectada)`, llamado por `main.c` al recibir `ANDIA_EV_RED`: sin red, para el cliente
+  WebSocket (`esp_websocket_client_stop`) para que no reintente cada 5 s despertando la CPU (hoy ANDIA no se entera
+  de la caída del WiFi); con red y una conversación pendiente o la vigilia activa, reconecta. Al encender, la
+  secuencia es la de hoy: asociación, DHCP, evento de red, y ANDIA abre el WebSocket.
 
 ### 5.2 Pantalla (`reloj_hw/pantalla.c`)
 
@@ -111,9 +112,11 @@ uint32_t energia_segundos_en_modo(void);
   `esp_lcd_sh8601` no implementa `disp_sleep`).
 - **Encender**: `lvgl_port_resume()` → refrescar la hora y dejar pintar un cuadro → SLPOUT (0x11) → espera que exige
   el panel (~120 ms) → DISPON (0x29) → brillo. Así nunca se ve la hora vieja.
-- **Despertar por toque**: `esp_lcd_touch_register_interrupt_callback()` sobre la INT del táctil (GPIO15, que el BSP
-  ya configura como interrupción por nivel bajo). El callback notifica a la tarea principal. En la etapa 2 se añade
-  `gpio_wakeup_enable(15, GPIO_INTR_LOW_LEVEL)` + `esp_sleep_enable_gpio_wakeup()` para salir del light sleep.
+- **Despertar por toque**: la INT del táctil (GPIO15, flanco de bajada) ya la tiene registrada el port de LVGL, que
+  con ella despierta su tarea y lee el táctil aunque los temporizadores estén parados. No se le disputa la ISR:
+  `pantalla.c` registra un callback `LV_EVENT_PRESSED` sobre el indev que levanta una bandera, y el bucle principal
+  la consulta con `pantalla_toque_pendiente()`. En la etapa 2 se añade el despertar del light sleep por GPIO15 en
+  nivel bajo (ver §6).
 - Con LVGL parado, `lv_display_get_inactive_time` deja de valer: el tiempo sin tocar lo lleva el bucle principal con
   sus propias marcas (`ahora_ms()` del último toque o encendido).
 
@@ -145,8 +148,12 @@ uint32_t energia_segundos_en_modo(void);
 
 ### 5.6 ANDIA (`reloj_andia/andia.c`)
 
-- Al pedir una conversación por botón sin red, muestra "conectando…" y espera al evento de red + WebSocket abierto
-  antes de empezar a capturar (hoy asume que la red está). Plazo: 10 s; si vence, error "sin conexión" como hoy.
+- `andia_conversar` deja de bloquear (hoy espera hasta 12 s al saludo del servidor dentro de la tarea que lo llama,
+  que puede ser la de LVGL: la interfaz se congelaría y "Conectando…" no se vería). Pasa a ser dirigido por eventos:
+  si ya hay saludo, empieza como hoy; si no, marca la conversación como pendiente, pone el estado CONECTANDO, arma un
+  plazo de 15 s (3-4 s de WiFi más el TLS por el hotspot) e intenta conectar. `andia_red(true)` reintenta cuando llega
+  la red; el "hola" del servidor arranca la conversación pendiente; el plazo vencido publica "Sin WiFi" o "Sin
+  conexión con ANDIA". `andia_cancelar` en CONECTANDO solo anula lo pendiente.
 
 ## 6. Etapa 2: gestión de energía de ESP-IDF
 
@@ -154,7 +161,6 @@ uint32_t energia_segundos_en_modo(void);
 
 ```
 CONFIG_PM_ENABLE=y
-CONFIG_PM_DFS_INIT_AUTO=y                 # 40-160 MHz, light sleep automático con tickless idle
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_BT_LE_SLEEP_ENABLE=y
 CONFIG_BT_LE_LP_CLK_SRC_MAIN_XTAL=y       # ya está; la placa no tiene cristal de 32 kHz cableado al ESP
@@ -169,8 +175,12 @@ activa `CONFIG_PM_POWER_DOWN_PERIPHERAL_IN_LIGHT_SLEEP`: los drivers de I²C, QS
 Con el cristal de 40 MHz como reloj de bajo consumo, el cristal sigue encendido durante el sueño del BLE: ahorra
 menos que con 32 kHz, pero es lo que la placa permite sin hardware nuevo.
 
-`energia.c` sostiene dos candados: `ESP_PM_CPU_FREQ_MAX` mientras `cpu_rapida` y `ESP_PM_NO_LIGHT_SLEEP` mientras
-`¬dormir`. En reposo suelta ambos y el light sleep es automático entre eventos; despiertan el chip el BLE (llegada de
+`energia_init` llama a `esp_pm_configure` con 160/40 MHz y `light_sleep_enable = true` (`CONFIG_PM_DFS_INIT_AUTO`
+no activa el light sleep por sí solo, por eso no se usa). `energia.c` sostiene dos candados: `ESP_PM_CPU_FREQ_MAX`
+mientras `cpu_rapida` y `ESP_PM_NO_LIGHT_SLEEP` mientras `¬dormir`. Para que un toque saque al chip del sueño se
+registran callbacks con `esp_pm_light_sleep_register_cbs`: al entrar, `gpio_wakeup_enable(15, GPIO_INTR_LOW_LEVEL)`;
+al salir, `gpio_wakeup_disable(15)` y de vuelta a flanco de bajada (`gpio_set_intr_type`), que es lo que espera el
+driver del táctil. Más `esp_sleep_enable_gpio_wakeup()` una vez. En reposo suelta ambos y el light sleep es automático entre eventos; despiertan el chip el BLE (llegada de
 notificación), el bucle cada 250 ms (botón PWR) y la INT del táctil. El RTC del ESP sigue en sueño ligero, así que
 `time()` no se desvía; además está el PCF85063.
 
@@ -199,7 +209,7 @@ notificación), el bucle cada 250 ms (botón PWR) y la INT del táctil. El RTC d
 | Riesgo | Cómo se acota |
 | --- | --- |
 | BLE + light sleep con el cristal de 40 MHz desincroniza la conexión con el iPhone | Prueba 6 antes de dar la etapa 2 por buena; si falla, se queda la etapa 1 y se estudia un cristal de 32 kHz |
-| La INT del táctil (GPIO15) nunca se ha usado | Primer paso de la etapa 1: log que confirme que baja al tocar. Si no, el despertar por toque pasa a ser un sondeo del táctil cada 250 ms desde el bucle |
+| Con los temporizadores de LVGL parados, `LV_EVENT_PRESSED` no llega al indev | La INT ya funciona hoy (el port la usa en modo evento). Si el evento no llega, se envuelve el `read_cb` del indev (`lv_indev_get_read_cb`) y la bandera se levanta ahí |
 | Basura del DMA al reabrir el códec | Descarte de 8 tramas tras cada apertura (mecanismo existente) |
 | Panel no pinta bien tras SLPIN | Reinicio por GPIO11 y reinicialización del panel al despertar (~200 ms más) |
 | RAM | PM añade poco; registro de batería 1 KB. El TLS del túnel sigue siendo el punto ajustado, como hoy |
