@@ -75,8 +75,9 @@ static struct {
     bool wifi_ok, en_casa, andia_ok;
     int rssi;
     unsigned ram_kb;
+    char energia[96];
 } aj = { 60, 20, 100, 60, true, "Anunciando…", "Dirección: --", "Emparejamiento guardado: no", false, "--", "--",
-         false, false, false, 0, 0 };
+         false, false, false, 0, 0, "Descarga: --" };
 
 typedef enum { SEC_SONIDO, SEC_PANTALLA, SEC_ANDIA, SEC_BLUETOOTH, SEC_WIFI, SEC_ACERCA, SEC_APAGAR, SEC_N } seccion_t;
 static seccion_t sub_tipo;
@@ -595,8 +596,8 @@ static lv_obj_t *texto_col(const lv_font_t *f, lv_color_t color, const char *t, 
 
 static void texto_acerca(char *buf, size_t cap)
 {
-    snprintf(buf, cap, "Reloj\nVersión %s\nRAM libre %u KB\nESP32-C6 · AMOLED 410×502\nWiFi %s",
-             esp_app_get_description()->version, aj.ram_kb, aj.wifi_ip);
+    snprintf(buf, cap, "Reloj\nVersión %s\nRAM libre %u KB\nESP32-C6 · AMOLED 410×502\nWiFi %s\n%s",
+             esp_app_get_description()->version, aj.ram_kb, aj.wifi_ip, aj.energia);
 }
 
 static void pintar_wifi(void)
@@ -629,7 +630,7 @@ static void abrir_seccion(seccion_t s)
     pantalla_negra(scr_sub);
     lv_obj_add_event_cb(scr_sub, gesto_sub, LV_EVENT_GESTURE, NULL);
     cabecera(scr_sub, LV_SYMBOL_LEFT " Atrás", al_pulsar_volver_ajustes, TITULOS[s]);
-    char buf[160];
+    char buf[256];   // Acerca de: seis líneas, la de energía de hasta 96
     lv_obj_t *b;
     switch (s) {
     case SEC_SONIDO:
@@ -1313,7 +1314,7 @@ static void refrescar_pie(void)
 static void refrescar_acerca(void)
 {
     if (sub_acerca) {
-        char b[160];
+        char b[256];
         texto_acerca(b, sizeof(b));
         lv_label_set_text(sub_acerca, b);
     }
@@ -1364,6 +1365,12 @@ void ui_ble(ble_estado_t estado, bool tiene_bond, const char *direccion)
 void ui_ram(unsigned kb)
 {
     aj.ram_kb = kb;
+    refrescar_acerca();
+}
+
+void ui_energia(const char *texto)
+{
+    snprintf(aj.energia, sizeof(aj.energia), "%s", texto);
     refrescar_acerca();
 }
 

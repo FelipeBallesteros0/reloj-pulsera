@@ -28,6 +28,7 @@
 #include "red.h"
 #include "andia.h"
 #include "voz.h"
+#include "bateria_registro.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "reloj";
@@ -36,6 +37,7 @@ static QueueHandle_t cola_andia;
 static int64_t t_apagado_ms;
 static int64_t t_encendido_ms;      // último encendido por evento (notificación, botón): cuenta como actividad
 static SemaphoreHandle_t mtx_notif;
+static bateria_registro_t reg_bat;   // una muestra por minuto: descarga en %/h en "Acerca de"
 
 static void notif_lock(void) { xSemaphoreTake(mtx_notif, portMAX_DELAY); }
 static void notif_unlock(void) { xSemaphoreGive(mtx_notif); }
@@ -357,6 +359,28 @@ static void apagar_pantalla(void)
     t_apagado_ms = ahora_ms();
 }
 
+static void texto_descarga(char *b, size_t cap, int minutos)
+{
+    int d;
+    if (bateria_registro_descarga(&reg_bat, minutos, &d)) {
+        snprintf(b, cap, "%s%d,%d %%/h", d < 0 ? "-" : "", abs(d) / 10, abs(d) % 10);
+    } else {
+        snprintf(b, cap, "--");
+    }
+}
+
+// Texto de energía para "Acerca de" (una muestra de batería por minuto; ver bateria_registro).
+static void refrescar_energia_ui(void)
+{
+    char a[24], c[24], t[96];
+    texto_descarga(a, sizeof(a), 30);
+    texto_descarga(c, sizeof(c), 120);
+    snprintf(t, sizeof(t), "Descarga %s (30 min) · %s (2 h)", a, c);
+    pantalla_lock(0);
+    ui_energia(t);
+    pantalla_unlock();
+}
+
 static void refrescar_bateria(void)
 {
     pantalla_lock(0);
@@ -383,6 +407,7 @@ void app_main(void)
     setenv("TZ", CONFIG_RELOJ_TZ, 1);
     tzset();
     ajustes_cargar();
+    bateria_registro_init(&reg_bat);
     log_ram("al arrancar");
 
     cola = xQueueCreate(16, sizeof(ble_evento_t));
@@ -452,7 +477,7 @@ void app_main(void)
     pantalla_unlock();
 
     time_t ultimo_seg = 0;
-    int64_t ultimo_bat = 0, ultimo_wifi_ui = 0;
+    int64_t ultimo_bat = 0, ultimo_wifi_ui = 0, ultimo_muestra = -60000;
     ble_evento_t ev;
     while (true) {
         if (xQueueReceive(cola, &ev, pdMS_TO_TICKS(ui_en_sensores() ? 100 : 250))) {
@@ -539,6 +564,13 @@ void app_main(void)
         if (ahora_ms() - ultimo_bat > 10000) {
             ultimo_bat = ahora_ms();
             refrescar_bateria();
+        }
+        if (ahora_ms() - ultimo_muestra >= 60000) {
+            ultimo_muestra = ahora_ms();
+            if (pmic_bateria_pct() >= 0) {
+                bateria_registro_agregar(&reg_bat, (uint16_t)pmic_bateria_mv(), (uint8_t)pmic_bateria_pct());
+            }
+            refrescar_energia_ui();
         }
 
         // Pantalla: se apaga sola por inactividad y despierta con un toque.

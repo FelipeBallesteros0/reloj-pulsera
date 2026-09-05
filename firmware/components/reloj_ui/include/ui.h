@@ -25,6 +25,7 @@ void ui_hora(const struct tm *t);
 void ui_bateria(int pct, bool cargando, bool usb);
 void ui_ble(ble_estado_t estado, bool tiene_bond, const char *direccion);
 void ui_ram(unsigned kb);
+void ui_energia(const char *texto);   // línea(s) de energía en "Acerca de"
 void ui_red(bool conectada, const char *ip);
 void ui_wifi(const char *ssid, const char *ip, bool en_casa, bool andia_conectada, int rssi);   // sección WiFi
 
