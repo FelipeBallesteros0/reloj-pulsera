@@ -1,6 +1,7 @@
 #include "ui.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "lvgl.h"
 #include "esp_app_desc.h"
 #include "notif_store.h"
@@ -43,7 +44,7 @@ static const char *MESES[] = { "enero", "febrero", "marzo", "abril", "mayo", "ju
 // Pantallas permanentes.
 static lv_obj_t *scr_reloj, *scr_menu, *scr_ajustes, *scr_lista, *scr_detalle, *scr_llamada, *scr_andia;
 // Pantallas que se crean al abrirlas y se borran al salir (RAM).
-static lv_obj_t *scr_sub, *scr_sensores, *scr_flappy;
+static lv_obj_t *scr_sub, *scr_sensores, *scr_flappy, *scr_snake;
 
 static lv_obj_t *and_estado, *and_pregunta, *and_respuesta, *and_boton, *and_boton_lbl, *btn_mic;
 static andia_estado_t and_est = ANDIA_INACTIVA;
@@ -75,7 +76,7 @@ static struct {
     int rssi;
     unsigned ram_kb;
 } aj = { 60, 20, 100, 60, true, "Anunciando…", "Dirección: --", "Emparejamiento guardado: no", false, "--", "--",
-         false, false, false, 0 };
+         false, false, false, 0, 0 };
 
 typedef enum { SEC_SONIDO, SEC_PANTALLA, SEC_ANDIA, SEC_BLUETOOTH, SEC_WIFI, SEC_ACERCA, SEC_APAGAR, SEC_N } seccion_t;
 static seccion_t sub_tipo;
@@ -158,6 +159,7 @@ static const char *nombre_app(const notif_t *n, char *buf, int cap) { return app
 // ---------------------------------------------------------------- pantallas efímeras
 
 static void flappy_parar(void);
+static void snake_parar(void);
 
 // Sale de una pantalla creada al vuelo: LVGL la borra al terminar la animación (auto_del) y se olvida su puntero.
 static void salir_efimera(lv_obj_t *destino, lv_screen_load_anim_t anim)
@@ -176,6 +178,9 @@ static void salir_efimera(lv_obj_t *destino, lv_screen_load_anim_t anim)
     } else if (vieja == scr_flappy) {
         flappy_parar();
         scr_flappy = NULL;
+    } else if (vieja == scr_snake) {
+        snake_parar();
+        scr_snake = NULL;
     } else {
         lv_screen_load_anim(destino, anim, 150, 0, false);
         return;
@@ -352,9 +357,10 @@ static void crear_reloj(void)
 
 // ---------------------------------------------------------------- menú de apps
 
-typedef enum { APP_AJUSTES, APP_ANDIA, APP_SENSORES, APP_FLAPPY } app_t;
+typedef enum { APP_AJUSTES, APP_ANDIA, APP_SENSORES, APP_FLAPPY, APP_SNAKE } app_t;
 static void abrir_sensores(void);
 static void abrir_flappy(void);
+static void abrir_snake(void);
 
 static void al_tocar_app(lv_event_t *e)
 {
@@ -363,23 +369,55 @@ static void al_tocar_app(lv_event_t *e)
     case APP_ANDIA: ui_ir_andia(); break;
     case APP_SENSORES: abrir_sensores(); break;
     case APP_FLAPPY: abrir_flappy(); break;
+    case APP_SNAKE: abrir_snake(); break;
     }
 }
 
-// Icono redondo de 140 px con el símbolo grande dentro y el nombre debajo; 2×2 por pantalla.
-static void icono_app(const char *simbolo, const char *nom, uint32_t color, int x, int y, app_t app)
+// Celda de una cuadrícula de iconos: círculo de `diam` px con el símbolo grande y el nombre debajo.
+static void celda_icono(lv_obj_t *cont, const char *simbolo, const char *texto, uint32_t color, int diam,
+                        lv_event_cb_t cb, void *dato)
 {
-    lv_obj_t *b = lv_button_create(scr_menu);
-    lv_obj_set_size(b, 140, 140);
+    lv_obj_t *celda = lv_obj_create(cont);
+    lv_obj_set_size(celda, 165, diam + 46);
+    lv_obj_set_style_bg_opa(celda, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(celda, 0, 0);
+    lv_obj_set_style_pad_all(celda, 0, 0);
+    lv_obj_remove_flag(celda, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *b = lv_button_create(celda);
+    lv_obj_set_size(b, diam, diam);
     lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
     lv_obj_set_style_shadow_width(b, 0, 0);
-    lv_obj_align(b, LV_ALIGN_TOP_LEFT, x, y);
-    lv_obj_t *s = etiqueta(b, FICONO, lv_color_white(), simbolo);
-    lv_obj_center(s);
-    lv_obj_add_event_cb(b, al_tocar_app, LV_EVENT_CLICKED, (void *)(uintptr_t)app);
-    lv_obj_t *l = etiqueta(scr_menu, F20, lv_color_white(), nom);
-    lv_obj_align_to(l, b, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, dato);
+    lv_obj_t *ic = etiqueta(b, FICONO, lv_color_white(), simbolo);
+    lv_obj_center(ic);
+    lv_obj_t *l = etiqueta(celda, F20, lv_color_white(), texto);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, diam + 8);
+}
+
+// Contenedor desplazable de dos columnas para cuadrículas de iconos (menú de apps y Configuración).
+static lv_obj_t *cuadricula(lv_obj_t *scr, int y)
+{
+    lv_obj_t *cont = lv_obj_create(scr);
+    lv_obj_set_size(cont, ANCHO, ALTO - y);
+    lv_obj_align(cont, LV_ALIGN_TOP_MID, 0, y);
+    lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(cont, 0, 0);
+    lv_obj_set_style_pad_hor(cont, 30, 0);
+    lv_obj_set_style_pad_top(cont, 12, 0);
+    lv_obj_set_style_pad_bottom(cont, 70, 0);   // la última fila puede subir por encima del arco inferior
+    lv_obj_set_style_pad_row(cont, 14, 0);
+    lv_obj_set_style_pad_column(cont, 20, 0);
+    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_scroll_dir(cont, LV_DIR_VER);
+    return cont;
+}
+
+static void icono_app(lv_obj_t *cont, const char *simbolo, const char *nom, uint32_t color, app_t app)
+{
+    celda_icono(cont, simbolo, nom, color, 140, al_tocar_app, (void *)(uintptr_t)app);
 }
 
 static void crear_menu(void)
@@ -389,13 +427,12 @@ static void crear_menu(void)
     lv_obj_add_event_cb(scr_menu, gesto_menu, LV_EVENT_GESTURE, NULL);
     lv_obj_t *t = etiqueta(scr_menu, F24, lv_color_white(), "Apps");
     lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 28);
-    // Centros en (115,160) (295,160) (115,350) (295,350): los círculos quedan dentro de los arcos de las esquinas.
-    icono_app(LV_SYMBOL_SETTINGS, "Configuración", 0x3a3a3a, 45, 90, APP_AJUSTES);
-    icono_app(LV_SYMBOL_AUDIO, "ANDIA", 0x1f3a5a, 225, 90, APP_ANDIA);
-    icono_app(LV_SYMBOL_GPS, "Sensores", 0x1f5a3a, 45, 280, APP_SENSORES);
-    icono_app(LV_SYMBOL_PLAY, "Flappy", 0x7a5a1c, 225, 280, APP_FLAPPY);
-    lv_obj_t *pie = etiqueta(scr_menu, F16, GRIS(), "Abajo: reloj");
-    lv_obj_align(pie, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_t *cont = cuadricula(scr_menu, 64);
+    icono_app(cont, LV_SYMBOL_SETTINGS, "Configuración", 0x3a3a3a, APP_AJUSTES);
+    icono_app(cont, LV_SYMBOL_AUDIO, "ANDIA", 0x1f3a5a, APP_ANDIA);
+    icono_app(cont, LV_SYMBOL_GPS, "Sensores", 0x1f5a3a, APP_SENSORES);
+    icono_app(cont, LV_SYMBOL_PLAY, "Flappy", 0x7a5a1c, APP_FLAPPY);
+    icono_app(cont, LV_SYMBOL_LOOP, "Snake", 0x2e6b2e, APP_SNAKE);
 }
 
 // ---------------------------------------------------------------- ANDIA
@@ -441,26 +478,9 @@ static void al_tocar_seccion(lv_event_t *e)
     abrir_seccion((seccion_t)(uintptr_t)lv_event_get_user_data(e));
 }
 
-// Celda de la cuadrícula de Configuración: icono redondo de 130 px con el nombre debajo (como el menú de apps).
 static void icono_seccion(lv_obj_t *cont, const char *simbolo, const char *texto, uint32_t color, seccion_t s)
 {
-    lv_obj_t *celda = lv_obj_create(cont);
-    lv_obj_set_size(celda, 165, 176);
-    lv_obj_set_style_bg_opa(celda, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(celda, 0, 0);
-    lv_obj_set_style_pad_all(celda, 0, 0);
-    lv_obj_remove_flag(celda, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *b = lv_button_create(celda);
-    lv_obj_set_size(b, 130, 130);
-    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
-    lv_obj_set_style_shadow_width(b, 0, 0);
-    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_add_event_cb(b, al_tocar_seccion, LV_EVENT_CLICKED, (void *)(uintptr_t)s);
-    lv_obj_t *ic = etiqueta(b, FICONO, lv_color_white(), simbolo);
-    lv_obj_center(ic);
-    lv_obj_t *l = etiqueta(celda, F20, lv_color_white(), texto);
-    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 138);
+    celda_icono(cont, simbolo, texto, color, 130, al_tocar_seccion, (void *)(uintptr_t)s);
 }
 
 static void crear_ajustes(void)
@@ -470,19 +490,7 @@ static void crear_ajustes(void)
     lv_obj_add_event_cb(scr_ajustes, gesto_ajustes, LV_EVENT_GESTURE, NULL);
     cabecera(scr_ajustes, LV_SYMBOL_LEFT " Apps", al_pulsar_volver_menu, "Configuración");
 
-    lv_obj_t *cont = lv_obj_create(scr_ajustes);
-    lv_obj_set_size(cont, ANCHO, ALTO - 72);
-    lv_obj_align(cont, LV_ALIGN_TOP_MID, 0, 72);
-    lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(cont, 0, 0);
-    lv_obj_set_style_pad_hor(cont, 30, 0);
-    lv_obj_set_style_pad_top(cont, 12, 0);
-    lv_obj_set_style_pad_bottom(cont, 70, 0);   // la última fila puede subir por encima del arco inferior
-    lv_obj_set_style_pad_row(cont, 14, 0);
-    lv_obj_set_style_pad_column(cont, 20, 0);
-    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_ROW_WRAP);   // dos columnas de iconos; se desplaza hacia abajo
-    lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_scroll_dir(cont, LV_DIR_VER);
+    lv_obj_t *cont = cuadricula(scr_ajustes, 72);
     icono_seccion(cont, LV_SYMBOL_VOLUME_MAX, "Sonido", 0x1f3a5a, SEC_SONIDO);
     icono_seccion(cont, LV_SYMBOL_IMAGE, "Pantalla", 0x3a3a5a, SEC_PANTALLA);
     icono_seccion(cont, LV_SYMBOL_AUDIO, "ANDIA", 0x1f5a3a, SEC_ANDIA);
@@ -916,6 +924,212 @@ static void abrir_flappy(void)
     lv_screen_load_anim(scr_flappy, LV_SCR_LOAD_ANIM_MOVE_LEFT, 150, 0, false);
 }
 
+
+// ---------------------------------------------------------------- app Snake (efímera)
+
+#define SN_CELDA 20
+#define SN_COLS 18
+#define SN_FILAS 19
+#define SN_X0 25                      // campo de 360×380 centrado y dentro de los arcos de las esquinas
+#define SN_Y0 70
+#define SN_MAX (SN_COLS * SN_FILAS)
+
+static lv_timer_t *sn_timer;
+static lv_obj_t *sn_seg[SN_MAX], *sn_comida, *sn_puntos, *sn_msg;
+static uint8_t sn_x[SN_MAX], sn_y[SN_MAX];   // anillo de posiciones: cabeza en sn_cab, cola en (sn_cab - largo + 1)
+static int sn_cab, sn_largo, sn_score, sn_periodo;
+static int sn_dx, sn_dy, sn_pdx, sn_pdy;      // dirección actual y la pedida con el último toque
+static int sn_cx, sn_cy;                      // comida
+static enum { SN_ESPERA, SN_JUGANDO, SN_FIN } sn_estado;
+
+static int sn_idx(int desde_cabeza) { return (sn_cab - desde_cabeza + SN_MAX) % SN_MAX; }
+
+static bool sn_ocupada(int x, int y)
+{
+    for (int i = 0; i < sn_largo; i++) {
+        int k = sn_idx(i);
+        if (sn_x[k] == x && sn_y[k] == y) return true;
+    }
+    return false;
+}
+
+static void sn_poner_comida(void)
+{
+    do {
+        sn_cx = (int)lv_rand(0, SN_COLS - 1);
+        sn_cy = (int)lv_rand(0, SN_FILAS - 1);
+    } while (sn_ocupada(sn_cx, sn_cy));
+    lv_obj_set_pos(sn_comida, SN_X0 + sn_cx * SN_CELDA + 2, SN_Y0 + sn_cy * SN_CELDA + 2);
+}
+
+static lv_obj_t *sn_cuadro(uint32_t color)
+{
+    lv_obj_t *o = lv_obj_create(scr_snake);
+    lv_obj_set_size(o, SN_CELDA - 2, SN_CELDA - 2);
+    lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
+    lv_obj_set_style_border_width(o, 0, 0);
+    lv_obj_set_style_radius(o, 4, 0);
+    lv_obj_set_style_pad_all(o, 0, 0);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    return o;
+}
+
+static void sn_colocar(int k)
+{
+    lv_obj_set_pos(sn_seg[k], SN_X0 + sn_x[k] * SN_CELDA + 1, SN_Y0 + sn_y[k] * SN_CELDA + 1);
+}
+
+static void sn_reiniciar(void)
+{
+    for (int i = 0; i < SN_MAX; i++) {
+        if (sn_seg[i]) {
+            lv_obj_delete(sn_seg[i]);
+            sn_seg[i] = NULL;
+        }
+    }
+    sn_largo = 3;
+    sn_cab = 2;
+    for (int i = 0; i < 3; i++) {
+        sn_x[i] = SN_COLS / 2 - 2 + i;
+        sn_y[i] = SN_FILAS / 2;
+        sn_seg[i] = sn_cuadro(i == 2 ? 0x8fe08f : 0x3cb371);
+        sn_colocar(i);
+    }
+    sn_dx = sn_pdx = 1;
+    sn_dy = sn_pdy = 0;
+    sn_score = 0;
+    sn_periodo = 170;
+    lv_timer_set_period(sn_timer, sn_periodo);
+    sn_poner_comida();
+    lv_label_set_text(sn_puntos, "0");
+    sn_estado = SN_ESPERA;
+    lv_label_set_text(sn_msg, "Toca un lado para\nelegir dirección");
+    lv_obj_remove_flag(sn_msg, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void sn_paso(lv_timer_t *t)
+{
+    if (sn_estado != SN_JUGANDO) return;
+    if (!(sn_pdx == -sn_dx && sn_pdy == -sn_dy)) {   // no se puede dar media vuelta
+        sn_dx = sn_pdx;
+        sn_dy = sn_pdy;
+    }
+    int nx = sn_x[sn_cab] + sn_dx, ny = sn_y[sn_cab] + sn_dy;
+    bool come = nx == sn_cx && ny == sn_cy;
+    // Chocar con el borde o con el cuerpo (la cola actual se mueve, salvo que se coma: entonces cuenta).
+    bool choque = nx < 0 || ny < 0 || nx >= SN_COLS || ny >= SN_FILAS;
+    for (int i = 0; i < sn_largo - (come ? 0 : 1) && !choque; i++) {
+        int k = sn_idx(i);
+        if (sn_x[k] == nx && sn_y[k] == ny) choque = true;
+    }
+    if (choque) {
+        sn_estado = SN_FIN;
+        char b[48];
+        snprintf(b, sizeof(b), "Fin · %d punto%s\nToca para repetir", sn_score, sn_score == 1 ? "" : "s");
+        lv_label_set_text(sn_msg, b);
+        lv_obj_remove_flag(sn_msg, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_obj_set_style_bg_color(sn_seg[sn_cab], lv_color_hex(0x3cb371), 0);   // la cabeza vieja pasa a cuerpo
+    int nuevo = (sn_cab + 1) % SN_MAX;
+    if (come) {
+        sn_seg[nuevo] = sn_cuadro(0x8fe08f);   // crece: el índice nuevo estrena cuadro
+        sn_largo++;
+        sn_score++;
+        char b[16];
+        snprintf(b, sizeof(b), "%d", sn_score);
+        lv_label_set_text(sn_puntos, b);
+        if (sn_score % 4 == 0 && sn_periodo > 80) {
+            sn_periodo -= 12;
+            lv_timer_set_period(sn_timer, sn_periodo);
+        }
+    } else {
+        int cola = sn_idx(sn_largo - 1);       // la cola se recicla como cabeza nueva
+        sn_seg[nuevo] = sn_seg[cola];
+        sn_seg[cola] = NULL;
+        lv_obj_set_style_bg_color(sn_seg[nuevo], lv_color_hex(0x8fe08f), 0);
+    }
+    sn_x[nuevo] = nx;
+    sn_y[nuevo] = ny;
+    sn_cab = nuevo;
+    sn_colocar(nuevo);
+    if (come) {
+        sn_poner_comida();
+    }
+}
+
+// Cuatro zonas: el toque manda la dirección absoluta según el lado de la pantalla más cercano.
+static void sn_tocar(lv_event_t *e)
+{
+    if (sn_estado == SN_FIN) {
+        sn_reiniciar();
+        return;
+    }
+    lv_point_t p;
+    lv_indev_get_point(lv_indev_active(), &p);
+    int dx = p.x - ANCHO / 2, dy = p.y - ALTO / 2;
+    if (abs(dx) > abs(dy)) {
+        sn_pdx = dx > 0 ? 1 : -1;
+        sn_pdy = 0;
+    } else {
+        sn_pdx = 0;
+        sn_pdy = dy > 0 ? 1 : -1;
+    }
+    if (sn_estado == SN_ESPERA) {
+        sn_estado = SN_JUGANDO;
+        lv_obj_add_flag(sn_msg, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void snake_parar(void)
+{
+    if (sn_timer) {
+        lv_timer_delete(sn_timer);
+        sn_timer = NULL;
+    }
+    memset(sn_seg, 0, sizeof(sn_seg));   // los cuadros se van con la pantalla
+}
+
+static void abrir_snake(void)
+{
+    scr_snake = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(scr_snake, lv_color_hex(0x0b1a0b), 0);
+    lv_obj_set_style_bg_opa(scr_snake, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(scr_snake, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(scr_snake, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(scr_snake, gesto_app, LV_EVENT_GESTURE, NULL);
+    lv_obj_add_event_cb(scr_snake, sn_tocar, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *campo = lv_obj_create(scr_snake);
+    lv_obj_set_size(campo, SN_COLS * SN_CELDA + 2, SN_FILAS * SN_CELDA + 2);
+    lv_obj_set_pos(campo, SN_X0 - 1, SN_Y0 - 1);
+    lv_obj_set_style_bg_opa(campo, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_color(campo, lv_color_hex(0x3a5a3a), 0);
+    lv_obj_set_style_border_width(campo, 1, 0);
+    lv_obj_set_style_radius(campo, 2, 0);
+    lv_obj_set_style_pad_all(campo, 0, 0);
+    lv_obj_remove_flag(campo, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *salir = boton(scr_snake, LV_SYMBOL_LEFT " Salir", 0x222222, al_pulsar_salir_app);
+    lv_obj_set_style_min_height(salir, CAB_ALTO, 0);
+    lv_obj_set_style_pad_ver(salir, 8, 0);
+    lv_obj_set_style_pad_hor(salir, 18, 0);
+    lv_obj_align(salir, LV_ALIGN_TOP_LEFT, CAB_X, CAB_Y);
+    sn_puntos = etiqueta(scr_snake, F24, lv_color_white(), "0");
+    lv_obj_align(sn_puntos, LV_ALIGN_TOP_MID, 60, TITULO_Y);
+    sn_comida = lv_obj_create(scr_snake);
+    lv_obj_set_size(sn_comida, SN_CELDA - 4, SN_CELDA - 4);
+    lv_obj_set_style_radius(sn_comida, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(sn_comida, lv_color_hex(0xe04040), 0);
+    lv_obj_set_style_border_width(sn_comida, 0, 0);
+    lv_obj_remove_flag(sn_comida, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    sn_msg = etiqueta(scr_snake, F24, lv_color_white(), "");
+    lv_obj_set_style_text_align(sn_msg, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(sn_msg, LV_ALIGN_CENTER, 0, 0);
+    memset(sn_seg, 0, sizeof(sn_seg));
+    sn_timer = lv_timer_create(sn_paso, 170, NULL);
+    sn_reiniciar();
+    lv_screen_load_anim(scr_snake, LV_SCR_LOAD_ANIM_MOVE_LEFT, 150, 0, false);
+}
+
 // ---------------------------------------------------------------- notificaciones: lista, detalle, llamada, popup
 
 static void crear_lista(void)
@@ -1282,7 +1496,8 @@ void ui_llamada(uint32_t uid, bool mostrar)
         if (lv_screen_active() != scr_llamada) {
             scr_antes_llamada = lv_screen_active();
             // Si estaba en una pantalla efímera, se vuelve a la carátula al colgar (esa pantalla se pierde).
-            if (scr_antes_llamada == scr_sub || scr_antes_llamada == scr_sensores || scr_antes_llamada == scr_flappy) {
+            if (scr_antes_llamada == scr_sub || scr_antes_llamada == scr_sensores || scr_antes_llamada == scr_flappy ||
+                scr_antes_llamada == scr_snake) {
                 scr_antes_llamada = scr_reloj;
             }
         }
