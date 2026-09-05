@@ -7,4 +7,5 @@ Referencia de Waveshare con su firmware: 1 h a brillo máximo, 3-4 h con pantall
 
 | Fecha | Etapa | Estado del firmware | %/h (2 h) | Notas |
 | --- | --- | --- | --- | --- |
-| (fecha) | 0 (base) | commit de la tarea 2 (`Acerca de: descarga…`) | | vigilia activada (así estaba) y desactivada: dos filas |
+| 2026-09-05 | 0 (base) | `b456fd8` (Acerca de: descarga…) | ~18 (carátula: 100 % → 62 % en ~2 h 05) | **vigilia activada**, WiFi en casa, BLE con el iPhone. "Acerca de" marcó "5 %" en una de sus ventanas (Felipe no precisó cuál): el medidor del AXP2101 parece quedarse en 100 % un rato tras cargar y caer de golpe; ≈ 75 mA de media |
+| (fecha) | 0 (base) | `b456fd8` | | **vigilia desactivada** |
