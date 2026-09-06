@@ -18,6 +18,7 @@ static char ip[16] = "--";
 static char ssid_actual[33] = "--";
 static int red_idx, fallos;
 static esp_netif_t *netif;
+static bool deseada;   // el WiFi debe estar encendido (lo decide el gestor de energía)
 
 typedef struct { const char *ssid; const char *clave; } red_t;
 static const red_t REDES[] = {
@@ -69,6 +70,9 @@ static void al_evento(void *arg, esp_event_base_t base, int32_t id, void *datos)
             strcpy(ip, "--");
             publicar(false);
         }
+        if (!deseada) {
+            return;   // apagado nuestro: sin reintentos
+        }
         fallos++;
         if (fallos >= 3) {
             fallos = 0;
@@ -105,9 +109,36 @@ esp_err_t red_init(QueueHandle_t cola_eventos)
     if (!REDES[0].ssid[0]) {
         siguiente_red();
     }
-    return esp_wifi_start();
+    return ESP_OK;   // no arranca: lo decide el gestor de energía (red_encender)
 }
 
+esp_err_t red_encender(void)
+{
+    if (deseada) {
+        return ESP_OK;
+    }
+    deseada = true;
+    fallos = 0;
+    ESP_LOGI(TAG, "WiFi encendido");
+    return esp_wifi_start();   // STA_START → conectar_a()
+}
+
+esp_err_t red_apagar(void)
+{
+    if (!deseada) {
+        return ESP_OK;
+    }
+    deseada = false;
+    ESP_LOGI(TAG, "WiFi apagado");
+    esp_err_t r = esp_wifi_stop();
+    if (conectada) {           // por si el evento de desconexión no llega (ya estaba caído)
+        strcpy(ip, "--");
+        publicar(false);
+    }
+    return r;
+}
+
+bool red_encendida(void) { return deseada; }
 bool red_conectada(void) { return conectada; }
 const char *red_ip(void) { return ip; }
 const char *red_ssid(void) { return ssid_actual; }

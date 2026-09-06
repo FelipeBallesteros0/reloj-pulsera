@@ -222,6 +222,7 @@ static void evento_andia(const andia_evento_t *ev)
 {
     switch (ev->tipo) {
     case ANDIA_EV_RED:
+        andia_red(ev->red_conectada);
         pantalla_lock(0);
         ui_red(ev->red_conectada, red_ip());
         refrescar_wifi_ui();
@@ -504,6 +505,7 @@ void app_main(void)
     if (red_init(cola_andia) != ESP_OK) {
         ESP_LOGW(TAG, "WiFi no arrancó");
     }
+    red_encender();   // provisional: el gestor de energía (tarea 10) decidirá
     if (andia_init(cola_andia) != ESP_OK) {
         ESP_LOGW(TAG, "cliente ANDIA no disponible");
     }

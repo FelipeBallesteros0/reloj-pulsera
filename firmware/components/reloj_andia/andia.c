@@ -604,6 +604,17 @@ static esp_err_t asegurar_cliente(void)
     return crear_cliente(lan);
 }
 
+// Abre el WebSocket si hay red (provisional: la conversación sin bloquear lo reemplaza).
+static void intentar_conectar(void)
+{
+    if (!red_conectada() || asegurar_cliente() != ESP_OK) {
+        return;
+    }
+    if (!esp_websocket_client_is_connected(ws)) {
+        esp_websocket_client_start(ws);
+    }
+}
+
 esp_err_t andia_init(QueueHandle_t q)
 {
     cola = q;
@@ -689,9 +700,7 @@ void andia_vigilia(bool activa)
     vigilia = activa;
     ESP_LOGI(TAG, "vigilia %s", activa ? "activada" : "desactivada");
     if (activa) {
-        if (red_conectada() && asegurar_cliente() == ESP_OK && !esp_websocket_client_is_connected(ws)) {
-            esp_websocket_client_start(ws);   // conexión permanente: el "Oye" no puede esperar al TLS
-        }
+        intentar_conectar();   // conexión permanente: el "Oye" no puede esperar al TLS
         if (!voz_capturando()) {
             voz_capturar_iniciar(al_capturar);
         }
@@ -702,6 +711,20 @@ void andia_vigilia(bool activa)
 }
 
 bool andia_vigilia_activa(void) { return vigilia; }
+
+void andia_red(bool conectada)
+{
+    if (!conectada) {
+        if (ws) {
+            esp_websocket_client_stop(ws);   // sin red no hay que reintentar cada 5 s
+            saludado = false;
+        }
+        return;
+    }
+    if (vigilia) {
+        intentar_conectar();
+    }
+}
 
 void andia_cancelar(void)
 {

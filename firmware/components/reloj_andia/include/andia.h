@@ -47,6 +47,7 @@ void andia_cancelar(void);
 // frase en modo gesto para que la Pi decida si empezaba por el nombre. Mantiene la conexión abierta.
 void andia_vigilia(bool activa);
 bool andia_vigilia_activa(void);
+void andia_red(bool conectada);              // el WiFi cayó o volvió (lo llama main al recibir ANDIA_EV_RED)
 andia_estado_t andia_estado(void);
 bool andia_conectada(void);                  // WebSocket abierto con la Pi
 
