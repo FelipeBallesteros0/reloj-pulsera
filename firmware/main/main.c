@@ -115,12 +115,11 @@ static void ajustes_cargar(void)
         return;
     }
     int32_t v;
-    uint8_t b;
     if (nvs_get_i32(h, "volumen", &v) == ESP_OK) aj.volumen = v;
     if (nvs_get_i32(h, "brillo", &v) == ESP_OK) aj.brillo = v;
     if (nvs_get_i32(h, "tiempo", &v) == ESP_OK) aj.tiempo_s = v;
     if (nvs_get_i32(h, "sensib", &v) == ESP_OK) aj.sensibilidad = v;
-    if (nvs_get_u8(h, "vigilia", &b) == ESP_OK) aj.vigilia = b;
+    if (nvs_get_i32(h, "vigilia", &v) == ESP_OK) aj.vigilia = v != 0;   // se guarda como i32 (ajustes_guardar); leerlo como u8 fallaba por tipo
     nvs_close(h);
 }
 
