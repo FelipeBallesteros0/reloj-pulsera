@@ -52,8 +52,13 @@ static volatile bool en_gesto;            // conversación abierta por el detect
 static int64_t vigilia_pausa_hasta_us;    // enfriamiento tras un fin sin activación / sin voz
 static int fallos_seguidos;               // "sin_activacion" seguidos: con 3, pausa larga
 static esp_timer_handle_t timer_sigue;
+static volatile bool conversacion_pendiente;   // pedida por botón/gesto, esperando red + saludo
+static bool gesto_pendiente;
+static esp_timer_handle_t timer_conexion;      // plazo para conseguir el saludo
 
 static void al_capturar(const uint8_t *pcm, size_t n);
+static void al_vencer_conexion(void *arg);
+static void empezar_conversacion(void);
 static const char *bajada_para_ahora(void);
 
 static void vaciar_cola(void)
@@ -175,6 +180,11 @@ static void procesar_mensaje(const char *json)
         bajada_adpcm = cJSON_IsString(bajada) ? strcmp(bajada->valuestring, "adpcm") == 0 : con_adpcm;
         saludado = true;
         ESP_LOGI(TAG, "servidor listo (subida %s, bajada %s)", con_adpcm ? "adpcm" : "pcm", bajada_adpcm ? "adpcm" : "pcm");
+        if (conversacion_pendiente) {
+            conversacion_pendiente = false;
+            esp_timer_stop(timer_conexion);
+            empezar_conversacion();
+        }
     } else if (strcmp(tipo, "activada") == 0) {
         armar_vigilante();
         fallos_seguidos = 0;
@@ -604,14 +614,62 @@ static esp_err_t asegurar_cliente(void)
     return crear_cliente(lan);
 }
 
-// Abre el WebSocket si hay red (provisional: la conversación sin bloquear lo reemplaza).
+// ---- Conexión sin bloquear: la conversación pedida espera a la red y al saludo del servidor, con plazo ----
+
+static void fallar_conexion(const char *motivo)
+{
+    conversacion_pendiente = false;
+    esp_timer_stop(timer_conexion);
+    poner_estado(ANDIA_INACTIVA);
+    red_ahorro(true);
+    publicar_texto(ANDIA_EV_ERROR, motivo, NULL);
+}
+
+// Abre el WebSocket si hay red; si no la hay, andia_red(true) volverá a llamar cuando llegue.
 static void intentar_conectar(void)
 {
-    if (!red_conectada() || asegurar_cliente() != ESP_OK) {
+    if (!red_conectada()) {
         return;
     }
-    if (!esp_websocket_client_is_connected(ws)) {
+    if (asegurar_cliente() != ESP_OK) {
+        if (conversacion_pendiente) {
+            fallar_conexion("Sin cliente ANDIA");
+        }
+        return;
+    }
+    if (!esp_websocket_client_is_connected(ws) && esp_websocket_client_start(ws) == ESP_ERR_INVALID_STATE) {
+        esp_websocket_client_stop(ws);           // corría pero caído: reintento
         esp_websocket_client_start(ws);
+    }
+}
+
+static void al_vencer_conexion(void *arg)
+{
+    if (conversacion_pendiente) {
+        fallar_conexion(red_conectada() ? "Sin conexión con ANDIA" : "Sin WiFi");
+    }
+}
+
+// Con el saludo hecho: "inicio", captura y envío.
+static void empezar_conversacion(void)
+{
+    char inicio[80];
+    snprintf(inicio, sizeof(inicio), "{\"t\":\"inicio\",\"modo\":\"%s\",\"bajada\":\"%s\"}",
+             gesto_pendiente ? "gesto" : "boton", bajada_para_ahora());
+    enviar_json(inicio);
+    memset(&envio, 0, sizeof(envio));
+    en_gesto = gesto_pendiente;
+    poner_estado(ANDIA_ESCUCHANDO);
+    armar_vigilante();
+    if (voz_capturar_iniciar(al_capturar) != ESP_OK) {
+        enviar_json("{\"t\":\"cancelar\"}");
+        terminar_conversacion();
+        publicar_texto(ANDIA_EV_ERROR, "Micrófono no disponible", NULL);
+        return;
+    }
+    enviando = true;                        // en vigilia la cola ya trae audio previo: no se pierde el arranque
+    if (tarea_envio) {
+        xTaskNotifyGive(tarea_envio);
     }
 }
 
@@ -627,39 +685,12 @@ esp_err_t andia_init(QueueHandle_t q)
     esp_timer_create(&a1, &timer_vigilante);
     esp_timer_create(&a2, &timer_ping);
     esp_timer_create(&a3, &timer_sigue);
+    const esp_timer_create_args_t a4 = { .callback = al_vencer_conexion, .name = "andia_conex" };
+    esp_timer_create(&a4, &timer_conexion);
     esp_timer_start_periodic(timer_ping, 30 * 1000000ULL);
     ESP_RETURN_ON_FALSE(xTaskCreate(tarea_enviar, "andia_tx", 3584, NULL, 5, &tarea_envio) == pdPASS, ESP_FAIL, TAG,
                         "tarea de envío");
     return ESP_OK;
-}
-
-static bool asegurar_conexion(void)
-{
-    if (!red_conectada()) {
-        publicar_texto(ANDIA_EV_ERROR, "Sin WiFi", NULL);
-        return false;
-    }
-    if (asegurar_cliente() != ESP_OK) {
-        publicar_texto(ANDIA_EV_ERROR, "Sin cliente ANDIA", NULL);
-        return false;
-    }
-    if (!esp_websocket_client_is_connected(ws)) {
-        poner_estado(ANDIA_CONECTANDO);
-        if (esp_websocket_client_start(ws) != ESP_OK && !esp_websocket_client_is_connected(ws)) {
-            // ya estaba arrancado pero caído: reintento
-            esp_websocket_client_stop(ws);
-            esp_websocket_client_start(ws);
-        }
-    }
-    for (int i = 0; i < 120 && !saludado; i++) {  // hasta 12 s: por el hotspot el TLS a veces tarda o reintenta
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-    if (!saludado) {
-        poner_estado(ANDIA_INACTIVA);
-        publicar_texto(ANDIA_EV_ERROR, "Sin conexión con ANDIA", NULL);
-        return false;
-    }
-    return true;
 }
 
 esp_err_t andia_conversar(bool gesto)
@@ -669,30 +700,18 @@ esp_err_t andia_conversar(bool gesto)
     }
     voz_reproducir_parar();
     red_ahorro(false);
-    if (!asegurar_conexion()) {
-        red_ahorro(true);
-        return ESP_FAIL;
+    gesto_pendiente = gesto;
+    if (saludado && ws && esp_websocket_client_is_connected(ws)) {
+        empezar_conversacion();
+        return ESP_OK;
     }
-    char inicio[80];
-    snprintf(inicio, sizeof(inicio), "{\"t\":\"inicio\",\"modo\":\"%s\",\"bajada\":\"%s\"}", gesto ? "gesto" : "boton",
-             bajada_para_ahora());
-    enviar_json(inicio);
-    memset(&envio, 0, sizeof(envio));
-    en_gesto = gesto;
-    poner_estado(ANDIA_ESCUCHANDO);
-    armar_vigilante();
-    esp_err_t r = voz_capturar_iniciar(al_capturar);
-    if (r != ESP_OK) {
-        enviar_json("{\"t\":\"cancelar\"}");
-        terminar_conversacion();
-        publicar_texto(ANDIA_EV_ERROR, "Micrófono no disponible", NULL);
-        return r;
-    }
-    enviando = true;                        // en vigilia la cola ya trae audio previo: mejor, no se pierde el arranque
-    if (tarea_envio) {
-        xTaskNotifyGive(tarea_envio);
-    }
-    return r;
+    // Sin saludo: el WiFi puede estar arrancando (desde reposo). Se espera al "hola" con plazo; no se bloquea.
+    conversacion_pendiente = true;
+    poner_estado(ANDIA_CONECTANDO);
+    esp_timer_stop(timer_conexion);
+    esp_timer_start_once(timer_conexion, 15 * 1000000ULL);   // 3-4 s de WiFi + hasta 12 s de TLS por el hotspot
+    intentar_conectar();
+    return ESP_OK;
 }
 
 void andia_vigilia(bool activa)
@@ -721,13 +740,17 @@ void andia_red(bool conectada)
         }
         return;
     }
-    if (vigilia) {
+    if (vigilia || conversacion_pendiente) {
         intentar_conectar();
     }
 }
 
 void andia_cancelar(void)
 {
+    if (conversacion_pendiente) {           // aún no empezó nada en el servidor
+        fallar_conexion("Cancelado");
+        return;
+    }
     if (estado == ANDIA_INACTIVA) {
         return;
     }
