@@ -567,7 +567,12 @@ void app_main(void)
             red_permitir_ahorro(!pmic_usb_conectado());
         }
 
-        // App "Sensores": mientras está abierta, leer el IMU y refrescar (el bucle espera 100 ms en vez de 250).
+        // App "Sensores": mientras está abierta, sensores encendidos, leer el IMU y refrescar (el bucle espera 100 ms).
+        static bool imu_activo;
+        if (ui_en_sensores() != imu_activo) {
+            imu_activo = ui_en_sensores();
+            imu_activar(imu_activo);
+        }
         if (ui_en_sensores()) {
             float ax, ay, az, gx, gy, gz;
             if (imu_leer(&ax, &ay, &az, &gx, &gy, &gz)) {

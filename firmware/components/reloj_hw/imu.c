@@ -18,10 +18,10 @@ esp_err_t imu_init(i2c_master_bus_handle_t bus)
     qmi8658_set_accel_unit_mps2(&dev, true);
     qmi8658_set_gyro_range(&dev, QMI8658_GYRO_RANGE_512DPS);
     qmi8658_set_gyro_odr(&dev, QMI8658_GYRO_ODR_125HZ);
-    qmi8658_enable_accel(&dev, true);
-    qmi8658_enable_gyro(&dev, true);
+    qmi8658_enable_accel(&dev, false);
+    qmi8658_enable_gyro(&dev, false);
     listo = true;
-    ESP_LOGI(TAG, "QMI8658 listo");
+    ESP_LOGI(TAG, "QMI8658 listo (sensores apagados hasta que se usen)");
     return ESP_OK;
 }
 
@@ -34,3 +34,16 @@ bool imu_leer(float *ax, float *ay, float *az, float *gx, float *gy, float *gz)
 }
 
 bool imu_disponible(void) { return listo; }
+
+static bool activo_actual;
+
+void imu_activar(bool activo)
+{
+    if (!listo || activo == activo_actual) {
+        return;
+    }
+    qmi8658_enable_accel(&dev, activo);
+    qmi8658_enable_gyro(&dev, activo);
+    activo_actual = activo;
+    ESP_LOGI(TAG, "sensores %s", activo ? "encendidos" : "apagados");
+}

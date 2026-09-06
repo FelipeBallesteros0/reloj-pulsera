@@ -10,6 +10,7 @@ esp_err_t imu_init(i2c_master_bus_handle_t bus);
 // Aceleración en m/s² y velocidad angular en °/s. false si el chip no respondió.
 bool imu_leer(float *ax, float *ay, float *az, float *gx, float *gy, float *gz);
 bool imu_disponible(void);
+void imu_activar(bool activo);   // sensores encendidos solo mientras alguien los lee
 #ifdef __cplusplus
 }
 #endif
