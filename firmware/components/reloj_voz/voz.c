@@ -15,6 +15,11 @@ static esp_codec_dev_handle_t mic, alt;
 static void (*cb_captura)(const uint8_t *, size_t);
 static volatile bool capturando, reproduciendo, fin_audio, tocando;
 static int tramas_a_descartar;             // tras reproducir, el DMA del micrófono trae lo acumulado (incluido el altavoz)
+static bool abierto;                       // códec abierto (canales I²S habilitados, amplificador encendido)
+static int volumen_pct = 60;               // se aplican en cada apertura (el códec cerrado no acepta ajustes)
+static float ganancia_db = 36.0f;          // con 24 dB la voz llegaba a -28 dBFS
+static int ciclos_ocioso;                  // ciclos de 100 ms sin captura ni reproducción
+#define CICLOS_PARA_CERRAR 20              // ~2 s
 static struct { int huecos, escrituras; int64_t inicio_us; } rep;   // diagnóstico de la reproducción
 #define TRAMAS_TRAS_REPRODUCIR 8            // ~256 ms
 static uint8_t mem_anillo[16 * 1024];      // 500 ms de audio mono (la reserva es de 400 ms)
@@ -28,18 +33,13 @@ esp_err_t voz_init(void)
     alt = bsp_audio_codec_speaker_init();
     mic = bsp_audio_codec_microphone_init();
     ESP_RETURN_ON_FALSE(alt && mic, ESP_FAIL, TAG, "no se pudo iniciar el códec");
-    // 16 kHz, 16 bit, MONO en el bus: la mitad de DMA que el ejemplo de Waveshare (que usa los dos micrófonos).
-    esp_codec_dev_sample_info_t fs = { .bits_per_sample = 16, .channel = 1, .sample_rate = VOZ_TASA };
-    ESP_RETURN_ON_FALSE(esp_codec_dev_open(alt, &fs) == 0, ESP_FAIL, TAG, "abrir altavoz");
-    ESP_RETURN_ON_FALSE(esp_codec_dev_open(mic, &fs) == 0, ESP_FAIL, TAG, "abrir micrófono");
-    esp_codec_dev_set_in_gain(mic, 36.0f);   // con 24 dB la voz llegaba a -28 dBFS
-    esp_codec_dev_set_out_vol(alt, 60);
+    // El códec no se abre aquí: lo abre la tarea de voz al primer uso y lo cierra tras ~2 s sin audio (ver abrir/cerrar).
     anillo_init(&anillo, mem_anillo, sizeof(mem_anillo));
     // Una sola tarea permanente para captura y reproducción (nunca ocurren a la vez): así no hay que reservar
     // pila en plena conversación, cuando la RAM está en su mínimo con TLS abierto.
     // Prioridad por encima del cliente WebSocket (5) y de LVGL (4): el DMA del altavoz no debe quedarse sin datos.
     ESP_RETURN_ON_FALSE(xTaskCreate(tarea_voz, "voz", 4096, NULL, 6, &tarea) == pdPASS, ESP_FAIL, TAG, "tarea");
-    ESP_LOGI(TAG, "códec listo (16 kHz mono)");
+    ESP_LOGI(TAG, "códec listo (16 kHz mono; se abre al usarse)");
     return ESP_OK;
 }
 
@@ -66,10 +66,43 @@ static void medir_nivel(const int16_t *pcm, size_t n, int64_t lectura_us, int64_
     }
 }
 
+// 16 kHz, 16 bit, MONO en el bus: la mitad de DMA que el ejemplo de Waveshare (que usa los dos micrófonos).
+static esp_err_t abrir(void)
+{
+    if (abierto) {
+        return ESP_OK;
+    }
+    esp_codec_dev_sample_info_t fs = { .bits_per_sample = 16, .channel = 1, .sample_rate = VOZ_TASA };
+    ESP_RETURN_ON_FALSE(esp_codec_dev_open(alt, &fs) == 0, ESP_FAIL, TAG, "abrir altavoz");
+    ESP_RETURN_ON_FALSE(esp_codec_dev_open(mic, &fs) == 0, ESP_FAIL, TAG, "abrir micrófono");
+    esp_codec_dev_set_in_gain(mic, ganancia_db);
+    esp_codec_dev_set_out_vol(alt, volumen_pct);
+    tramas_a_descartar = TRAMAS_TRAS_REPRODUCIR;   // el DMA recién arrancado trae basura
+    abierto = true;
+    ciclos_ocioso = 0;
+    ESP_LOGI(TAG, "códec abierto");
+    return ESP_OK;
+}
+
+static void cerrar(void)
+{
+    if (!abierto) {
+        return;
+    }
+    esp_codec_dev_close(mic);   // deshabilita los canales I²S (suelta el candado de PM del driver)
+    esp_codec_dev_close(alt);   // y el ES8311 baja el GPIO6 del amplificador
+    abierto = false;
+    ESP_LOGI(TAG, "códec cerrado");
+}
+
 static void tarea_voz(void *p)
 {
     static int16_t buf[512];
     for (;;) {
+        if ((reproduciendo || capturando) && !abierto && abrir() != ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
         // La reproducción manda: en vigilia la captura no se detiene nunca y, si tuviera prioridad, la voz de
         // ANDIA jamás sonaría. Mientras se toca, el micrófono pierde tramas (da igual: el detector está parado).
         if (reproduciendo) {
@@ -119,8 +152,12 @@ static void tarea_voz(void *p)
             } else {
                 vTaskDelay(pdMS_TO_TICKS(10));
             }
+        } else if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)) == 0) {   // sin trabajo: contar hasta cerrar
+            if (abierto && ++ciclos_ocioso >= CICLOS_PARA_CERRAR) {
+                cerrar();
+            }
         } else {
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+            ciclos_ocioso = 0;
         }
     }
 }
@@ -167,14 +204,16 @@ void voz_reproducir_parar(void) { anillo_vaciar(&anillo); fin_audio = true; repr
 bool voz_reproduciendo(void) { return reproduciendo; }
 void voz_ganancia_mic(float db)
 {
-    if (mic) {
+    ganancia_db = db;
+    if (mic && abierto) {
         esp_codec_dev_set_in_gain(mic, db);
     }
 }
 
 void voz_volumen(int pct)
 {
-    if (alt) {
+    volumen_pct = pct;
+    if (alt && abierto) {
         esp_codec_dev_set_out_vol(alt, pct);
     }
 }
