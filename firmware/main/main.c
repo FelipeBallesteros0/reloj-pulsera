@@ -35,15 +35,16 @@
 static const char *TAG = "reloj";
 static QueueHandle_t cola;
 static QueueHandle_t cola_andia;
-static int64_t t_apagado_ms;
 static int64_t t_encendido_ms;      // último encendido por evento (notificación, botón): cuenta como actividad
+typedef enum { MOTIVO_USUARIO, MOTIVO_AVISO } motivo_t;   // por qué se encendió la pantalla
+static bool pantalla_por_usuario = true;                  // arranque = usuario
 static SemaphoreHandle_t mtx_notif;
 static bateria_registro_t reg_bat;   // una muestra por minuto: descarga en %/h en "Acerca de"
 
 static void notif_lock(void) { xSemaphoreTake(mtx_notif, portMAX_DELAY); }
 static void notif_unlock(void) { xSemaphoreGive(mtx_notif); }
 
-static void encender_pantalla(void);
+static void encender_pantalla(motivo_t motivo);
 
 static void log_ram(const char *momento)
 {
@@ -89,7 +90,7 @@ static esp_timer_handle_t timer_andia;
 
 static void cb_microfono(void)
 {
-    encender_pantalla();
+    encender_pantalla(MOTIVO_USUARIO);
     esp_err_t r = andia_conversar(false);
     if (r == ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "ANDIA ya está en una conversación");
@@ -202,7 +203,7 @@ static void aviso_local(const char *titulo, const char *mensaje, const char *ori
     localtime_r(&ahora, &tt);
     strftime(at.fecha, sizeof(at.fecha), "%Y%m%dT%H%M%S", &tt);
     notif_store_poner_detalle(uid, &at);
-    encender_pantalla();
+    encender_pantalla(MOTIVO_AVISO);
     pantalla_lock(0);
     ui_notifs_refrescar();
     ui_aviso(uid);
@@ -233,7 +234,7 @@ static void evento_andia(const andia_evento_t *ev)
         break;
     case ANDIA_EV_ESTADO:
         if (ev->estado != ANDIA_INACTIVA) {
-            encender_pantalla();
+            encender_pantalla(MOTIVO_AVISO);
         }
         pantalla_lock(0);
         if (ev->estado == ANDIA_ACTIVADA && !ui_en_andia()) {
@@ -244,7 +245,7 @@ static void evento_andia(const andia_evento_t *ev)
         break;
     case ANDIA_EV_SIGUE:            // dijiste solo el nombre: pitido y a escuchar la pregunta
         pitidos(1);
-        encender_pantalla();
+        encender_pantalla(MOTIVO_AVISO);
         break;
     case ANDIA_EV_PREGUNTA:
         pantalla_lock(0);
@@ -252,7 +253,7 @@ static void evento_andia(const andia_evento_t *ev)
         pantalla_unlock();
         break;
     case ANDIA_EV_RESPUESTA:
-        encender_pantalla();
+        encender_pantalla(MOTIVO_AVISO);
         pantalla_lock(0);
         ui_andia_respuesta(ev->texto);
         pantalla_unlock();
@@ -268,7 +269,7 @@ static void evento_andia(const andia_evento_t *ev)
         pantalla_unlock();
         break;
     case ANDIA_EV_ERROR:
-        encender_pantalla();
+        encender_pantalla(MOTIVO_AVISO);
         pantalla_lock(0);
         ui_andia_estado(ANDIA_INACTIVA);
         ui_andia_error(ev->texto);
@@ -310,7 +311,7 @@ static void evento_notif(const ble_evento_t *ev)
     case BLE_NOTIF_NUEVA:
         refrescar_notifs();
         if (existe && n.categoria == ANCS_CAT_LLAMADA && !(n.flags & ANCS_FLAG_PREEXISTENTE)) {
-            encender_pantalla();
+            encender_pantalla(MOTIVO_AVISO);
             pantalla_lock(0);
             ui_llamada(ev->notif.uid, true);
             pantalla_unlock();
@@ -323,7 +324,7 @@ static void evento_notif(const ble_evento_t *ev)
     case BLE_NOTIF_DETALLE:
         refrescar_notifs();
         if (ev->notif.aviso && existe && n.categoria != ANCS_CAT_LLAMADA) {
-            encender_pantalla();
+            encender_pantalla(MOTIVO_AVISO);
             pantalla_lock(0);
             ui_aviso(ev->notif.uid);
             pantalla_unlock();
@@ -345,10 +346,24 @@ static void evento_notif(const ble_evento_t *ev)
     }
 }
 
-static void encender_pantalla(void)
+static void encender_pantalla(motivo_t motivo)
 {
+    t_encendido_ms = ahora_ms();                  // cada evento cuenta como actividad
+    if (motivo == MOTIVO_USUARIO) {
+        pantalla_por_usuario = true;
+    }
+    if (pantalla_encendida()) {
+        return;
+    }
+    pantalla_por_usuario = (motivo == MOTIVO_USUARIO);
+    // La hora al día antes de que el panel se vea (LVGL aún parado: solo cambia el texto; dibuja al reanudar).
+    time_t ahora = time(NULL);
+    struct tm t;
+    localtime_r(&ahora, &t);
+    pantalla_lock(0);
+    ui_hora(&t);
+    pantalla_unlock();
     pantalla_encender();
-    t_encendido_ms = ahora_ms();
 }
 
 static void apagar_pantalla(void)
@@ -357,7 +372,6 @@ static void apagar_pantalla(void)
     ui_ir_reloj();   // así el toque que la despierta no cae sobre ningún botón
     pantalla_unlock();
     pantalla_apagar();
-    t_apagado_ms = ahora_ms();
 }
 
 static void texto_descarga(char *b, size_t cap, int minutos)
@@ -412,17 +426,21 @@ static void refrescar_energia_ui(void)
     snprintf(t, sizeof(t), "Bat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)\nArranque hace %lu min (%s)",
              pmic_bateria_pct(), pmic_bateria_mv(), h30, h120, a, c,
              (unsigned long)(esp_timer_get_time() / 60000000), motivo_arranque());
-    pantalla_lock(0);
-    ui_energia(t);
-    pantalla_unlock();
+    if (pantalla_encendida()) {
+        pantalla_lock(0);
+        ui_energia(t);
+        pantalla_unlock();
+    }
 }
 
 static void refrescar_bateria(void)
 {
-    pantalla_lock(0);
-    ui_bateria(pmic_bateria_pct(), pmic_cargando(), pmic_usb_conectado());
-    ui_ram((unsigned)(esp_get_free_heap_size() / 1024));
-    pantalla_unlock();
+    if (pantalla_encendida()) {
+        pantalla_lock(0);
+        ui_bateria(pmic_bateria_pct(), pmic_cargando(), pmic_usb_conectado());
+        ui_ram((unsigned)(esp_get_free_heap_size() / 1024));
+        pantalla_unlock();
+    }
     ESP_LOGI(TAG, "latido: RAM libre %u B (bloque mayor %u B), batería %d %% (%d mV), USB %s, BLE %d, pantalla %s, WiFi %d dBm",
              (unsigned)esp_get_free_heap_size(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
              pmic_bateria_pct(), pmic_bateria_mv(),
@@ -554,7 +572,7 @@ void app_main(void)
             if (pantalla_encendida()) {
                 apagar_pantalla();
             } else {
-                encender_pantalla();
+                encender_pantalla(MOTIVO_USUARIO);
             }
         }
         if (pe.pwr_largo) {
@@ -582,7 +600,7 @@ void app_main(void)
                 pantalla_unlock();
             }
         }
-        if (ahora_ms() - ultimo_wifi_ui > 5000) {
+        if (pantalla_encendida() && ahora_ms() - ultimo_wifi_ui > 5000) {
             ultimo_wifi_ui = ahora_ms();
             pantalla_lock(0);
             refrescar_wifi_ui();
@@ -597,7 +615,7 @@ void app_main(void)
 
         // Reloj y batería.
         time_t ahora = time(NULL);
-        if (ahora != ultimo_seg) {
+        if (pantalla_encendida() && ahora != ultimo_seg) {
             ultimo_seg = ahora;
             localtime_r(&ahora, &t);
             pantalla_lock(0);
@@ -616,15 +634,18 @@ void app_main(void)
             refrescar_energia_ui();
         }
 
-        // Pantalla: se apaga sola por inactividad y despierta con un toque.
-        uint32_t sin_tocar = pantalla_ms_sin_tocar();
-        int64_t limite = (int64_t)aj.tiempo_s * 1000;
-        if (pantalla_encendida()) {
-            if ((int64_t)sin_tocar > limite && ahora_ms() - t_encendido_ms > limite) {
-                apagar_pantalla();
+        // Toque: enciende la pantalla apagada; en una pantalla encendida por un aviso, pasa a ser "por el usuario".
+        if (pantalla_toque_pendiente()) {
+            if (!pantalla_encendida()) {
+                encender_pantalla(MOTIVO_USUARIO);
+            } else {
+                pantalla_por_usuario = true;
             }
-        } else if ((int64_t)sin_tocar < ahora_ms() - t_apagado_ms) {
-            encender_pantalla();   // hubo un toque después de apagarla
+        }
+        // Apagado por inactividad (con LVGL en marcha su cuenta de inactividad es fiable).
+        int64_t limite = (int64_t)aj.tiempo_s * 1000;
+        if (pantalla_encendida() && (int64_t)pantalla_ms_sin_tocar() > limite && ahora_ms() - t_encendido_ms > limite) {
+            apagar_pantalla();
         }
     }
 }

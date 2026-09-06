@@ -9,6 +9,10 @@
 #include "bsp/display.h"
 #include "bsp/touch.h"
 #include "sdkconfig.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 
 static const char *TAG = "pantalla";
 
@@ -30,6 +34,8 @@ static lv_display_t *disp;
 static lv_indev_t *indev;
 static int brillo_pct = 80;
 static bool encendida;
+static volatile bool toque_pendiente;
+static SemaphoreHandle_t sem_cuadro;   // lo da la tarea LVGL cada vez que termina de dibujar
 
 // El CO5300 exige áreas de dibujo con inicio par y fin impar (mismo truco que usa el BSP).
 static void redondear_area(lv_event_t *e)
@@ -46,6 +52,28 @@ static void brillo_hw(int pct)
     uint8_t v = (uint8_t)(pct * 255 / 100);
     uint32_t cmd = (0x02u << 24) | (0x51u << 8);   // opcode de escritura QSPI + registro de brillo del panel
     esp_lcd_panel_io_tx_param(io, cmd, &v, 1);
+}
+
+// Corre en la tarea LVGL. Con la pantalla apagada y LVGL parado sigue llegando: la INT del táctil (GPIO15) despierta
+// la tarea del port, que lee el indev igualmente.
+static void al_presionar(lv_event_t *e)
+{
+    (void)e;
+    toque_pendiente = true;
+}
+
+// Corre en la tarea LVGL al terminar de dibujar un cuadro: así el encendido espera a que la carátula esté pintada
+// sin dibujar desde la tarea principal (su pila de 3,5 KB no aguanta un render completo).
+static void al_cuadro_listo(lv_event_t *e)
+{
+    (void)e;
+    xSemaphoreGive(sem_cuadro);
+}
+
+// Comando del panel sin parámetros (mismo formato QSPI que el brillo).
+static void comando(uint8_t c)
+{
+    esp_lcd_panel_io_tx_param(io, (0x02u << 24) | ((uint32_t)c << 8), NULL, 0);
 }
 
 esp_err_t pantalla_init(void)
@@ -73,6 +101,8 @@ esp_err_t pantalla_init(void)
     disp = lvgl_port_add_disp(&dcfg);
     ESP_RETURN_ON_FALSE(disp, ESP_FAIL, TAG, "lvgl_port_add_disp");
     lv_display_add_event_cb(disp, redondear_area, LV_EVENT_INVALIDATE_AREA, NULL);
+    sem_cuadro = xSemaphoreCreateBinary();
+    lv_display_add_event_cb(disp, al_cuadro_listo, LV_EVENT_RENDER_READY, NULL);
 
     ESP_RETURN_ON_ERROR(bsp_touch_new(NULL, &tp), TAG, "táctil");
     // El FT3168 entrega Y espejado respecto del panel en esta placa (el BSP lo deja sin espejo).
@@ -81,6 +111,7 @@ esp_err_t pantalla_init(void)
     const lvgl_port_touch_cfg_t tcfg = { .disp = disp, .handle = tp };
     indev = lvgl_port_add_touch(&tcfg);
     ESP_RETURN_ON_FALSE(indev, ESP_FAIL, TAG, "lvgl_port_add_touch");
+    lv_indev_add_event_cb(indev, al_presionar, LV_EVENT_PRESSED, NULL);
 
     encendida = true;
     brillo_hw(brillo_pct);
@@ -110,7 +141,10 @@ void pantalla_apagar(void)
     }
     brillo_hw(0);
     esp_lcd_panel_disp_on_off(panel, false);
+    comando(0x10);            // SLPIN: el controlador del panel a dormir
+    lvgl_port_stop();         // sin tick ni temporizadores ni redibujos; el toque sigue llegando por la INT
     encendida = false;
+    ESP_LOGI(TAG, "apagada (panel en sleep, LVGL parado)");
 }
 
 void pantalla_encender(void)
@@ -118,9 +152,31 @@ void pantalla_encender(void)
     if (encendida) {
         return;
     }
+    lvgl_port_resume();
+    comando(0x11);            // SLPOUT: el panel pide ~120 ms antes de DISPON; mientras, la tarea LVGL repinta
+    int64_t t0 = esp_timer_get_time();
+    lvgl_port_lock(0);
+    lv_obj_invalidate(lv_screen_active());
+    xSemaphoreTake(sem_cuadro, 0);        // descarta un cuadro anterior
+    lvgl_port_unlock();
+    if (xSemaphoreTake(sem_cuadro, pdMS_TO_TICKS(400)) != pdTRUE) {
+        ESP_LOGW(TAG, "LVGL no dibujó en 400 ms; enciendo igual");
+    }
+    int64_t falta_us = 130000 - (esp_timer_get_time() - t0);   // 120 ms del panel + margen para el último flush
+    if (falta_us > 0) {
+        vTaskDelay(pdMS_TO_TICKS(falta_us / 1000 + 1));
+    }
     esp_lcd_panel_disp_on_off(panel, true);
     brillo_hw(brillo_pct);
     encendida = true;
+    ESP_LOGI(TAG, "encendida en %d ms", (int)((esp_timer_get_time() - t0) / 1000));
+}
+
+bool pantalla_toque_pendiente(void)
+{
+    bool t = toque_pendiente;
+    toque_pendiente = false;
+    return t;
 }
 
 bool pantalla_encendida(void) { return encendida; }

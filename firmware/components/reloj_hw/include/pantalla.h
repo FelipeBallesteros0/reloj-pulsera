@@ -16,11 +16,12 @@ bool pantalla_lock(uint32_t ms);        // mutex de LVGL (0 = esperar lo que hag
 void pantalla_unlock(void);
 void pantalla_brillo(int pct);          // 0-100; se recuerda para el próximo encendido
 int  pantalla_brillo_actual(void);
-void pantalla_encender(void);
-void pantalla_apagar(void);             // brillo 0 + comando "display off"; LVGL sigue vivo para detectar el toque
+void pantalla_encender(void);           // reanuda LVGL, saca al panel del sleep, espera el primer cuadro dibujado y muestra; solo desde la tarea principal
+void pantalla_apagar(void);             // brillo 0, DISPOFF, SLPIN y LVGL parado; el toque sigue detectándose por la INT
 bool pantalla_encendida(void);
 uint32_t pantalla_ms_sin_tocar(void);   // milisegundos desde el último toque
 bool pantalla_punto_tocado(int *x, int *y);   // true (y coordenadas) si hay un dedo apoyado ahora
+bool pantalla_toque_pendiente(void);    // true una vez por cada toque (también con la pantalla apagada)
 
 #ifdef __cplusplus
 }
