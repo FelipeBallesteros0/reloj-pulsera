@@ -18,6 +18,8 @@ void bateria_registro_agregar(bateria_registro_t *r, uint16_t mv, uint8_t pct); 
 // Descarga en décimas de %/h entre la muestra de hace `minutos` (o la más vieja, si hay al menos media ventana)
 // y la última. false si no hay muestras suficientes.
 bool bateria_registro_descarga(const bateria_registro_t *r, int minutos, int *decimas_pct_h);
+// Muestra de hace `minutos` (0 = la última). false si aún no hay tantas.
+bool bateria_registro_muestra(const bateria_registro_t *r, int minutos, uint16_t *mv, uint8_t *pct);
 #ifdef __cplusplus
 }
 #endif

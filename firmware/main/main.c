@@ -369,13 +369,30 @@ static void texto_descarga(char *b, size_t cap, int minutos)
     }
 }
 
-// Texto de energía para "Acerca de" (una muestra de batería por minuto; ver bateria_registro).
+// "hace N min: 72 %" o "hace N min: --" si aún no hay muestra.
+static void texto_hace(char *b, size_t cap, int minutos)
+{
+    uint16_t mv;
+    uint8_t pct;
+    if (bateria_registro_muestra(&reg_bat, minutos, &mv, &pct)) {
+        snprintf(b, cap, "%u %%", pct);
+    } else {
+        snprintf(b, cap, "--");
+    }
+}
+
+// Texto de energía para "Acerca de" (una muestra de batería por minuto; ver bateria_registro). El medidor del
+// AXP2101 marca 100 % mientras carga y cae a la carga real minutos después de quitar el USB: por eso se muestran
+// los mV y el % de hace 30 min y 2 h, para juzgar la ventana.
 static void refrescar_energia_ui(void)
 {
-    char a[24], c[24], t[96];
+    char a[24], c[24], h30[12], h120[12], t[176];
     texto_descarga(a, sizeof(a), 30);
     texto_descarga(c, sizeof(c), 120);
-    snprintf(t, sizeof(t), "Descarga %s (30 min) · %s (2 h)", a, c);
+    texto_hace(h30, sizeof(h30), 30);
+    texto_hace(h120, sizeof(h120), 120);
+    snprintf(t, sizeof(t), "Bat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)",
+             pmic_bateria_pct(), pmic_bateria_mv(), h30, h120, a, c);
     pantalla_lock(0);
     ui_energia(t);
     pantalla_unlock();

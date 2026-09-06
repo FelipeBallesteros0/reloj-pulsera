@@ -19,6 +19,16 @@ static uint16_t indice(const bateria_registro_t *r, int atras)
     return (uint16_t)((r->sig + BATERIA_REGISTRO_N - 1 - atras) % BATERIA_REGISTRO_N);
 }
 
+bool bateria_registro_muestra(const bateria_registro_t *r, int minutos, uint16_t *mv, uint8_t *pct)
+{
+    if (minutos < 0 || minutos >= r->n) {
+        return false;
+    }
+    *mv = r->mv[indice(r, minutos)];
+    *pct = r->pct[indice(r, minutos)];
+    return true;
+}
+
 bool bateria_registro_descarga(const bateria_registro_t *r, int minutos, int *decimas_pct_h)
 {
     int k = (minutos + 1 < r->n) ? minutos + 1 : r->n;   // muestras que caben en la ventana

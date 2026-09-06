@@ -27,6 +27,11 @@ int main(void)
         bateria_registro_agregar(&r, 4100, (uint8_t)(50 + i / 6));
     }
     assert(bateria_registro_descarga(&r, 60, &d) && d < 0);
+    // Muestras sueltas: la última y la de hace 60 min; fuera de rango no hay
+    uint16_t mv; uint8_t pct;
+    assert(bateria_registro_muestra(&r, 0, &mv, &pct) && mv == 4100 && pct == 60);
+    assert(bateria_registro_muestra(&r, 60, &mv, &pct) && mv == 4100 && pct == 50);
+    assert(!bateria_registro_muestra(&r, BATERIA_REGISTRO_N, &mv, &pct));
     puts("test_bateria: OK");
     return 0;
 }
