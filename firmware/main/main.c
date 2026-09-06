@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "bsp/esp-bsp.h"
@@ -369,6 +370,23 @@ static void texto_descarga(char *b, size_t cap, int minutos)
     }
 }
 
+static const char *motivo_arranque(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "encendido";
+    case ESP_RST_SW:       return "software";
+    case ESP_RST_PANIC:    return "panic";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return "watchdog";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_USB:      return "USB";
+    case ESP_RST_JTAG:     return "JTAG";
+    case ESP_RST_EXT:      return "externo";
+    default:               return "otro";
+    }
+}
+
 // "hace N min: 72 %" o "hace N min: --" si aún no hay muestra.
 static void texto_hace(char *b, size_t cap, int minutos)
 {
@@ -386,13 +404,14 @@ static void texto_hace(char *b, size_t cap, int minutos)
 // los mV y el % de hace 30 min y 2 h, para juzgar la ventana.
 static void refrescar_energia_ui(void)
 {
-    char a[24], c[24], h30[12], h120[12], t[176];
+    char a[24], c[24], h30[12], h120[12], t[208];
     texto_descarga(a, sizeof(a), 30);
     texto_descarga(c, sizeof(c), 120);
     texto_hace(h30, sizeof(h30), 30);
     texto_hace(h120, sizeof(h120), 120);
-    snprintf(t, sizeof(t), "Bat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)",
-             pmic_bateria_pct(), pmic_bateria_mv(), h30, h120, a, c);
+    snprintf(t, sizeof(t), "Bat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)\nArranque hace %lu min (%s)",
+             pmic_bateria_pct(), pmic_bateria_mv(), h30, h120, a, c,
+             (unsigned long)(esp_timer_get_time() / 60000000), motivo_arranque());
     pantalla_lock(0);
     ui_energia(t);
     pantalla_unlock();
@@ -425,6 +444,7 @@ void app_main(void)
     tzset();
     ajustes_cargar();
     bateria_registro_init(&reg_bat);
+    ESP_LOGI(TAG, "arranque por %s", motivo_arranque());
     log_ram("al arrancar");
 
     cola = xQueueCreate(16, sizeof(ble_evento_t));

@@ -7,11 +7,13 @@ Protocolo: cargar a tope → desconectar USB → pantalla apagada, sin tocar, 2 
 quitar el USB, cae a la carga real (~70 % tras una carga "completa" de una hora). El % también baja de golpe con la
 pantalla encendida (estimación por tensión bajo carga) y se recupera al apagarla. Por eso el dato válido es la
 **ventana de 2 h de "Acerca de"** leída nada más encender la pantalla, no la diferencia con el 100 % de partida; la
-línea muestra además los mV y el % de hace 30 min y 2 h para juzgarla. Leer rápido y apagar.
+línea muestra además los mV y el % de hace 30 min y 2 h para juzgarla. Leer rápido y apagar. La medida más fiable
+es dejarlo **toda la noche** y leer por la mañana; "Acerca de" indica también el motivo y la hora del último arranque,
+porque un reinicio vacía el registro.
 
 Referencia de Waveshare con su firmware: 1 h a brillo máximo, 3-4 h con pantalla apagada, ~6 h en bajo consumo.
 
 | Fecha | Etapa | Estado del firmware | %/h (2 h) | Notas |
 | --- | --- | --- | --- | --- |
 | 2026-09-05 17:05-19:08 | 0 (base) | `b456fd8` (Acerca de: descarga…) | **~5** (ventana 2 h a las 19:08; a las 19:20, con la pantalla encendida entretanto, 9) | **vigilia activada**, WiFi en casa, BLE con el iPhone. Carátula 100 % al desconectar → 62 % a las 19:08 → 52 % a las 19:20: el 100 % era el de carga, no vale. ≈ 20 mA de media |
-| (fecha) | 0 (base) | `b456fd8` | | **vigilia desactivada** |
+| 2026-09-05 20:12 → 06 08:42 | 0 (base) | `0d416fb` | **~9** (de 4213 mV lleno a 2 % / 3413 mV en ~11,5 h; cambio de hora esa noche) | **vigilia desactivada**, WiFi en casa, BLE. Lectura a las 21:41 de las ventanas: 24 %/h (30 min), 17,6 %/h (2 h): el medidor salta; la cifra buena es la de toda la noche. Por la mañana todas las ventanas en `--`: **el reloj se reinició** (registro en RAM vacío), seguramente brownout al agotarse. ≈ 35 mA de media, **autonomía ~11,5 h** |
