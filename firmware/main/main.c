@@ -30,6 +30,7 @@
 #include "andia.h"
 #include "voz.h"
 #include "bateria_registro.h"
+#include "energia.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "reloj";
@@ -45,6 +46,7 @@ static void notif_lock(void) { xSemaphoreTake(mtx_notif, portMAX_DELAY); }
 static void notif_unlock(void) { xSemaphoreGive(mtx_notif); }
 
 static void encender_pantalla(motivo_t motivo);
+static void energia_refrescar(void);
 
 static void log_ram(const char *momento)
 {
@@ -107,7 +109,8 @@ static void cb_cancelar_andia(void)
 static void pitidos(int n);
 
 // ---- Ajustes del usuario (persisten en NVS, espacio "ajustes") ----
-static struct { int volumen, brillo, tiempo_s, sensibilidad; bool vigilia; } aj = { 60, 60, 20, 100, true };
+// "Oye Andia" solo si el usuario lo activa: impide el reposo (micrófono y WiFi siempre encendidos).
+static struct { int volumen, brillo, tiempo_s, sensibilidad; bool vigilia; } aj = { 60, 60, 20, 100, false };
 
 static void ajustes_cargar(void)
 {
@@ -144,6 +147,7 @@ static void cb_vigilia(bool activa)
     aj.vigilia = activa;
     ajustes_guardar("vigilia", activa);
     andia_vigilia(activa);
+    energia_refrescar();
 }
 
 static void cb_brillo(int pct) { aj.brillo = pct; ajustes_guardar("brillo", pct); pantalla_brillo(pct); }
@@ -364,6 +368,7 @@ static void encender_pantalla(motivo_t motivo)
     ui_hora(&t);
     pantalla_unlock();
     pantalla_encender();
+    energia_refrescar();
 }
 
 static void apagar_pantalla(void)
@@ -372,6 +377,20 @@ static void apagar_pantalla(void)
     ui_ir_reloj();   // así el toque que la despierta no cae sobre ningún botón
     pantalla_unlock();
     pantalla_apagar();
+    energia_refrescar();
+}
+
+// Le cuenta al gestor de energía el estado actual; barato, se llama en cada vuelta del bucle y tras cada cambio.
+static void energia_refrescar(void)
+{
+    energia_entradas_t e = {
+        .usb = pmic_usb_conectado(),
+        .vigilia = aj.vigilia,
+        .pantalla = pantalla_encendida(),
+        .pantalla_por_usuario = pantalla_por_usuario,
+        .conversacion = andia_estado() != ANDIA_INACTIVA,
+    };
+    energia_actualizar(&e);
 }
 
 static void texto_descarga(char *b, size_t cap, int minutos)
@@ -418,12 +437,13 @@ static void texto_hace(char *b, size_t cap, int minutos)
 // los mV y el % de hace 30 min y 2 h, para juzgar la ventana.
 static void refrescar_energia_ui(void)
 {
-    char a[24], c[24], h30[12], h120[12], t[208];
+    char a[24], c[24], h30[12], h120[12], t[256];
     texto_descarga(a, sizeof(a), 30);
     texto_descarga(c, sizeof(c), 120);
     texto_hace(h30, sizeof(h30), 30);
     texto_hace(h120, sizeof(h120), 120);
-    snprintf(t, sizeof(t), "Bat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)\nArranque hace %lu min (%s)",
+    snprintf(t, sizeof(t), "Modo %s desde hace %lu min\nBat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)\nArranque hace %lu min (%s)",
+             energia_modo_nombre(energia_modo()), (unsigned long)(energia_segundos_en_modo() / 60),
              pmic_bateria_pct(), pmic_bateria_mv(), h30, h120, a, c,
              (unsigned long)(esp_timer_get_time() / 60000000), motivo_arranque());
     if (pantalla_encendida()) {
@@ -523,7 +543,8 @@ void app_main(void)
     if (red_init(cola_andia) != ESP_OK) {
         ESP_LOGW(TAG, "WiFi no arrancó");
     }
-    red_encender();   // provisional: el gestor de energía (tarea 10) decidirá
+    ESP_ERROR_CHECK(energia_init());
+    energia_refrescar();   // arranque = pantalla por el usuario: WiFi encendido
     if (andia_init(cola_andia) != ESP_OK) {
         ESP_LOGW(TAG, "cliente ANDIA no disponible");
     }
@@ -647,5 +668,6 @@ void app_main(void)
         if (pantalla_encendida() && (int64_t)pantalla_ms_sin_tocar() > limite && ahora_ms() - t_encendido_ms > limite) {
             apagar_pantalla();
         }
+        energia_refrescar();
     }
 }

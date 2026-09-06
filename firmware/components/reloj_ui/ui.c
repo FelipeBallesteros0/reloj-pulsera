@@ -75,7 +75,7 @@ static struct {
     bool wifi_ok, en_casa, andia_ok;
     int rssi;
     unsigned ram_kb;
-    char energia[208];
+    char energia[256];
 } aj = { 60, 20, 100, 60, true, "Anunciando…", "Dirección: --", "Emparejamiento guardado: no", false, "--", "--",
          false, false, false, 0, 0, "Descarga: --" };
 
@@ -630,7 +630,7 @@ static void abrir_seccion(seccion_t s)
     pantalla_negra(scr_sub);
     lv_obj_add_event_cb(scr_sub, gesto_sub, LV_EVENT_GESTURE, NULL);
     cabecera(scr_sub, LV_SYMBOL_LEFT " Atrás", al_pulsar_volver_ajustes, TITULOS[s]);
-    char buf[352];   // Acerca de: ocho líneas, las tres de energía de hasta 208
+    char buf[400];   // Acerca de: nueve líneas, las cuatro de energía de hasta 256
     lv_obj_t *b;
     switch (s) {
     case SEC_SONIDO:
@@ -1314,7 +1314,7 @@ static void refrescar_pie(void)
 static void refrescar_acerca(void)
 {
     if (sub_acerca) {
-        char b[352];
+        char b[400];
         texto_acerca(b, sizeof(b));
         lv_label_set_text(sub_acerca, b);
     }
