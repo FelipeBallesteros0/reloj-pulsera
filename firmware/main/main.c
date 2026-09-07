@@ -437,13 +437,20 @@ static void texto_hace(char *b, size_t cap, int minutos)
 // los mV y el % de hace 30 min y 2 h, para juzgar la ventana.
 static void refrescar_energia_ui(void)
 {
-    char a[24], c[24], h30[12], h120[12], t[256];
+    char a[24], c[24], h30[12], h120[12], r[64], t[320];
+    uint32_t rs, rn;
+    int rp;
+    if (energia_ultimo_reposo(&rs, &rp, &rn)) {
+        snprintf(r, sizeof(r), "\nÚltimo reposo %lu min: dormido %d %% (%lu sueños)", (unsigned long)(rs / 60), rp, (unsigned long)rn);
+    } else {
+        r[0] = 0;
+    }
     texto_descarga(a, sizeof(a), 30);
     texto_descarga(c, sizeof(c), 120);
     texto_hace(h30, sizeof(h30), 30);
     texto_hace(h120, sizeof(h120), 120);
-    snprintf(t, sizeof(t), "Modo %s desde hace %lu min\nBat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)\nArranque hace %lu min (%s)",
-             energia_modo_nombre(energia_modo()), (unsigned long)(energia_segundos_en_modo() / 60),
+    snprintf(t, sizeof(t), "Modo %s desde hace %lu min%s\nBat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)\nArranque hace %lu min (%s)",
+             energia_modo_nombre(energia_modo()), (unsigned long)(energia_segundos_en_modo() / 60), r,
              pmic_bateria_pct(), pmic_bateria_mv(), h30, h120, a, c,
              (unsigned long)(esp_timer_get_time() / 60000000), motivo_arranque());
     if (pantalla_encendida()) {

@@ -11,6 +11,8 @@ esp_err_t energia_init(void);                              // con CONFIG_PM_ENAB
 void energia_actualizar(const energia_entradas_t *e);      // aplica solo lo que cambió; registra los cambios de modo
 energia_modo_t energia_modo(void);
 uint32_t energia_segundos_en_modo(void);
+// Estadística del último reposo terminado: duración, % del tiempo en light sleep y entradas en sueño. false si no hubo.
+bool energia_ultimo_reposo(uint32_t *segundos, int *dormido_pct, uint32_t *n_suenos);
 #ifdef __cplusplus
 }
 #endif
