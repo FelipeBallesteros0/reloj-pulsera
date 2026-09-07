@@ -11,6 +11,8 @@
 
 static const char *TAG = "voz";
 static void tarea_voz(void *p);
+static esp_err_t abrir(void);
+static void cerrar(void);
 static esp_codec_dev_handle_t mic, alt;
 static void (*cb_captura)(const uint8_t *, size_t);
 static volatile bool capturando, reproduciendo, fin_audio, tocando;
@@ -39,6 +41,11 @@ esp_err_t voz_init(void)
     // pila en plena conversación, cuando la RAM está en su mínimo con TLS abierto.
     // Prioridad por encima del cliente WebSocket (5) y de LVGL (4): el DMA del altavoz no debe quedarse sin datos.
     ESP_RETURN_ON_FALSE(xTaskCreate(tarea_voz, "voz", 4096, NULL, 6, &tarea) == pdPASS, ESP_FAIL, TAG, "tarea");
+    // El BSP deja los dos canales I²S habilitados, y cada canal habilitado sostiene un candado de PM que impide el
+    // light sleep. Abrir y cerrar una vez los deja deshabilitados (y suelta los candados) hasta que haga falta audio.
+    if (abrir() == ESP_OK) {
+        cerrar();
+    }
     ESP_LOGI(TAG, "códec listo (16 kHz mono; se abre al usarse)");
     return ESP_OK;
 }
