@@ -142,7 +142,14 @@ void pantalla_apagar(void)
     brillo_hw(0);
     esp_lcd_panel_disp_on_off(panel, false);
     comando(0x10);            // SLPIN: el controlador del panel a dormir
-    lvgl_port_stop();         // sin tick ni temporizadores ni redibujos; el toque sigue llegando por la INT
+    lvgl_port_stop();         // para el tick de 5 ms (y desactiva los temporizadores)
+    // Con los temporizadores desactivados lv_timer_handler devuelve "1 ms" y la tarea del port gira sin parar,
+    // impidiendo el light sleep. Se reactivan con el de refresco a 1 s: con el tick congelado ninguno vence y la
+    // tarea espera lo que falte (hasta 500 ms) por vuelta. El toque sigue llegando por la INT.
+    lvgl_port_lock(0);
+    lv_timer_set_period(lv_display_get_refr_timer(disp), 1000);
+    lv_timer_enable(true);
+    lvgl_port_unlock();
     encendida = false;
     ESP_LOGI(TAG, "apagada (panel en sleep, LVGL parado)");
 }
@@ -152,6 +159,9 @@ void pantalla_encender(void)
     if (encendida) {
         return;
     }
+    lvgl_port_lock(0);
+    lv_timer_set_period(lv_display_get_refr_timer(disp), LV_DEF_REFR_PERIOD);
+    lvgl_port_unlock();
     lvgl_port_resume();
     comando(0x11);            // SLPOUT: el panel pide ~120 ms antes de DISPON; mientras, la tarea LVGL repinta
     int64_t t0 = esp_timer_get_time();

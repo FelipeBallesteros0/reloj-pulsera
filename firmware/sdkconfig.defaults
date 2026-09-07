@@ -25,8 +25,9 @@ CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_DEFAULT_MONTSERRAT_16=y
 CONFIG_LV_USE_FONT_COMPRESSED=y
 CONFIG_LV_TXT_BREAK_CHARS=" ,.;:-_"
-CONFIG_LV_USE_SYSMON=y
-CONFIG_LV_USE_PERF_MONITOR=y
+# Sin monitor de rendimiento de LVGL: era un temporizador más y un rótulo "30 FPS" en la esquina
+# CONFIG_LV_USE_SYSMON is not set
+# CONFIG_LV_USE_PERF_MONITOR is not set
 
 # ---- Bluetooth: NimBLE, solo periférico, 1 conexión, bonds en NVS ----
 CONFIG_BT_ENABLED=y

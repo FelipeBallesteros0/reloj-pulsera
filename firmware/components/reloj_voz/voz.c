@@ -159,7 +159,7 @@ static void tarea_voz(void *p)
             } else {
                 vTaskDelay(pdMS_TO_TICKS(10));
             }
-        } else if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)) == 0) {   // sin trabajo: contar hasta cerrar
+        } else if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(abierto ? 100 : 1000)) == 0) {   // sin trabajo: contar hasta cerrar; cerrado, despertar poco
             if (abierto && ++ciclos_ocioso >= CICLOS_PARA_CERRAR) {
                 cerrar();
             }
