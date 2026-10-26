@@ -12,7 +12,7 @@ historial propios; solo reutiliza código (herramientas, recordatorios, STT, cli
 
 | Tema | Decisión |
 | --- | --- |
-| Nombre y sigla | **ANDIA** (asistente de voz) |
+| Nombre | **ANDIA** |
 | Frases de activación | "Oye/Hola/Hey/Ey Andia" y "Andia" sola, al inicio de la frase |
 | Dónde se decide la activación | **En la Pi, sobre la transcripción** (OpenAI `gpt-4o-transcribe` con pista de vocabulario). Cambio del 2026-09-03: Porcupine descartado (la cuenta de Picovoice de Felipe fue borrada y no se puede reactivar), Vosk descartado (no conoce "Andia"; lo transcribe como "hoy en día"), WakeNet del C6 solo trae palabras fijas en inglés/chino |
 | Disparo en el reloj | Levantar la muñeca (IMU) abre una ventana de escucha de 6 s; respaldo: botón de micrófono en la carátula y PWR largo |
