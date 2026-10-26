@@ -1,68 +1,98 @@
-# Reloj de pulsera — firmware propio para Waveshare ESP32-C6-Touch-AMOLED-2.06
+# Wrist watch — custom firmware for the Waveshare ESP32-C6-Touch-AMOLED-2.06
 
-Firmware propio (ESP-IDF v5.5.5 + LVGL 9.5 + NimBLE) para el reloj de desarrollo de Waveshare.
-Objetivos por fases: (F1) vincularse al iPhone por Bluetooth y tomar la hora, (F2) mostrar las
-notificaciones del iPhone (protocolo ANCS de Apple), (F3) asistente virtual, (F4) autonomía.
+*[Leer en español](README.es.md)*
 
-El plan completo y las decisiones están en `docs/plan.md`.
+A from-scratch firmware for Waveshare's watch-shaped ESP32-C6 dev board: **iPhone notifications over BLE (ANCS)**,
+time sync, a voice assistant client (**ANDIA**), a few apps and a power-management pass that took the board from
+~11.5 h of battery to <!-- AUTONOMIA -->**(overnight measurement pending)**.
 
-## Estructura
+No code from the factory firmware (esp-brookesia launcher + XiaoZhi AI) is reused; only the official board support
+package (BSP) is used, as drivers.
 
-- `firmware/` — proyecto ESP-IDF (la app).
-- `docs/` — notas de hardware, protocolo ANCS, RAM, y el texto de la wiki de Waveshare (`docs/wiki/`).
-- `referencias/` — material de terceros solo para consultar: repo de Waveshare (submódulo), BSP v2.0.0,
-  puerto de fábrica de XiaoZhi para esta placa, ejemplo NimBLE ANCS de ESP-IDF.
-- `respaldo/` — (no versionado) volcado completo de la flash de fábrica y resumen de eFuses.
-- `herramientas/` — scripts: pasar el USB a WSL, respaldar/restaurar flash, generar fuentes.
+| | |
+| --- | --- |
+| MCU | ESP32-C6 (RISC-V, 160 MHz), **512 KB SRAM, no PSRAM**, 16 MB flash |
+| Display | 2.06" AMOLED 410×502 (CO5300, QSPI), capacitive touch FT3168, corners with a ~115 px radius |
+| Also on board | AXP2101 PMIC, PCF85063 RTC, QMI8658 IMU, ES8311 + ES7210 audio codec (speaker + 2 mics), ~400 mAh Li-Po |
+| Stack | ESP-IDF **v5.5.5**, LVGL **9.5**, **NimBLE** |
 
-## Emparejar con el iPhone (primera vez)
+## What it does
 
-iOS 16+ **no muestra en Ajustes → Bluetooth** a los periféricos BLE genéricos, aunque soliciten ANCS (política de
-Apple; le pasa a todos los relojes caseros). El emparejamiento inicial se hace desde una app de escaneo BLE:
+- **Pairs with an iPhone** without an app on the phone and takes the time from it (Current Time Service) into the RTC.
+- **Notifications** (Apple Notification Center Service): pop-up card, list, detail view with accents and emojis
+  (monochrome Noto Emoji as fallback); **Dismiss** on the watch also removes it from the iPhone; incoming call screen.
+- **ANDIA voice assistant** (client): microphone → WebSocket → a server on a Raspberry Pi (speech-to-text, LLM, TTS)
+  → speaker. Works over the home LAN (`ws://`) or through a Cloudflare tunnel (`wss://`, TLS 1.2). Audio is
+  IMA ADPCM 4:1 when the link is weak and PCM when it is strong. Optional always-listening mode ("Oye Andia").
+  The server is a separate, private project; the protocol is described below.
+- **Apps**: Settings (sound, display, ANDIA, Bluetooth, WiFi, about, power off), Sensors (IMU), Flappy, Snake.
+- **Power management**: light sleep with tickless idle and BLE modem sleep while the screen is off; WiFi, codec,
+  panel and IMU are only powered while used. "About" shows battery history, discharge rate and the last reset reason.
 
-1. Instalar **nRF Connect for Mobile** (Nordic) en el iPhone.
-2. Scanner → SCAN → conectar a **"Reloj"**. El reloj pide cifrado y iOS muestra su diálogo "Solicitud de enlace" → Enlazar.
-3. Listo: el bond queda en el sistema; iOS reconecta solo cada vez que el reloj anuncia (sin la app). Al vincular,
-   el reloj toma la hora del iPhone (Current Time Service) y la guarda en el RTC.
+## Pairing with the iPhone (first time)
 
-Para desemparejar: en el reloj, Ajustes → "Olvidar iPhone"; en el iPhone, Ajustes → Bluetooth → "Omitir dispositivo".
+iOS 16+ **does not list generic BLE peripherals in Settings → Bluetooth**, even when they solicit ANCS. The first
+pairing is done from a BLE scanner app:
 
-## Uso del reloj
+1. Install **nRF Connect for Mobile** (Nordic) on the iPhone.
+2. Scanner → SCAN → connect to **"Reloj"**. The watch requests encryption and iOS shows its pairing request → Pair.
+3. Done: the bond is stored by iOS, which reconnects on its own from then on (no app needed).
 
-- Carátula: hora, fecha, Bluetooth y batería. **Deslizar hacia abajo → notificaciones; hacia arriba → ajustes** (como en el teléfono).
-- Notificaciones: tarjeta emergente 6 s al llegar (tocarla abre el detalle); en el detalle, **Descartar** la borra también
-  del iPhone. Llamada entrante: pantalla propia con Contestar/Rechazar.
-- Ajustes: brillo, estado Bluetooth, "Olvidar iPhone" (pide un segundo toque), versión y RAM libre.
-- Botón PWR: corto = pantalla on/off; 4 s = apagar el reloj. La pantalla se apaga sola a los 20 s sin tocar.
+To unpair: on the watch, Settings → Bluetooth → "Olvidar iPhone"; on the iPhone, Settings → Bluetooth → Forget.
 
-Estado (2026-09-03): **F0, F1 y F2 completas y probadas con el iPhone** (vinculación, hora, notificaciones con acentos y
-emojis, descartar). Pendiente: probar llamada entrante, ráfagas de notificaciones y modos de Concentración; F3 (asistente)
-por decidir; F4 (autonomía).
+## Using it
 
-## Compilar y flashear
+- Watch face: time, date, Bluetooth and battery. **Swipe up → apps; swipe down → notifications.**
+- PWR button: short press = screen on/off; long press = talk to ANDIA; holding it longer powers the watch off (PMIC).
+- The UI is in Spanish.
 
-Flujo por defecto: **compilar en WSL, flashear y leer la consola desde Windows** (esptool nativo en COM3).
-usbip funciona para adjuntar el reloj a WSL, pero se atasca en transferencias masivas (una lectura de flash quedó
-congelada en 172 KB); el esptool de Windows lee/escribe los 16 MB en ~1 minuto.
+## Building and flashing
+
+Built on WSL2 with ESP-IDF v5.5.5; flashed from Windows (esptool over the native USB-Serial/JTAG, COM3), because
+usbip stalls on large transfers.
 
 ```bash
-idf                                  # alias de ". ~/esp/esp-idf/export.sh"
-cd firmware && idf.py build          # compila (ESP-IDF v5.5.5, target esp32c6)
-../herramientas/flash_win.sh         # flashea firmware/build por COM3 (py.exe -m esptool)
-../herramientas/monitor_win.sh 15 COM3 --reset   # captura 15 s de consola reiniciando el reloj (ver nota)
+. ~/esp/esp-idf/export.sh
+cd firmware
+idf.py menuconfig                      # first time: Reloj → your WiFi networks, ANDIA URL and token
+idf.py build
+../herramientas/flash_win.sh           # flashes firmware/build through COM3
+../herramientas/monitor_win.sh 15 COM3 --reset
 ```
 
-Nota sobre la consola: la salida por USB-Serial/JTAG solo llega si el puerto está abierto **desde el arranque**; si
-se abre después, no sale nada. Por eso el monitor se usa con `--reset`. Para capturas largas en segundo plano usar
-`SALIDA=C:/ruta/consola.log herramientas/monitor_win.sh 1200 COM3 --reset` (escribe el archivo directamente; la
-salida estándar de un .exe lanzado en segundo plano desde WSL llega vacía). La primera línea del archivo trae el
-PID de Windows para pararlo: `powershell Stop-Process -Id <pid>`.
+Your WiFi networks and the ANDIA URL/token go in `idf.py menuconfig` → *Reloj* and are saved in `firmware/sdkconfig`,
+which is **ignored by git** (never commit it). The console on the USB-Serial/JTAG only prints if the port is open from
+boot, hence `--reset`.
 
-Otras herramientas:
+Before flashing anything, back up the factory image: `herramientas/respaldo_flash.sh`
+(restore with `herramientas/restaurar_fabrica.sh`).
 
-- `herramientas/usb.sh windows|wsl|estado` — si hace falta el reloj en WSL (`/dev/ttyACM0`, p. ej. `idf.py monitor`
-  interactivo), `usb.sh wsl` lo adjunta con re-attach automático; `usb.sh windows` lo devuelve a COM3.
-- `herramientas/respaldo_flash.sh` — volcado de 16 MB desde WSL (lento/atascable por usbip; preferir desde Windows:
-  `py.exe -m esptool --chip esp32c6 -p COM3 -b 921600 read-flash 0 0x1000000 C:/ruta/fabrica.bin`).
-- `herramientas/restaurar_fabrica.sh <imagen>` — vuelve a la fábrica desde `respaldo/` (o con esptool de Windows, `write-flash 0x0`).
-- Regla udev `/etc/udev/rules.d/99-esp32.rules` (MODE 0666 para VID 303a) para que WSL pueda abrir el puerto sin `dialout`.
+## Repository layout
+
+- `firmware/` — ESP-IDF project. Components: `reloj_hw` (display, PMIC, RTC, IMU, buttons), `reloj_ble` (NimBLE,
+  ANCS, CTS), `reloj_notif` (notification store), `reloj_ui` (LVGL UI and apps), `reloj_red` (WiFi), `reloj_voz`
+  (I²S audio, ADPCM, ring buffer), `reloj_andia` (WebSocket client), `reloj_energia` (power policy and battery log).
+- `test_host/` — unit tests that run on the PC (`make` in that folder): ANCS parsing, CTS, ADPCM, ring buffer,
+  battery log, power policy.
+- `docs/` — hardware notes, RAM budget (`ram.md`), power measurements (`energia.md`), the plan and the design
+  documents (in Spanish).
+- `herramientas/` — flashing, console, USB-to-WSL, backup/restore and font generation scripts.
+- `referencias/` — third-party material for reference only (Waveshare repo as a submodule, BSP, XiaoZhi board port,
+  ESP-IDF ANCS example).
+
+## ANDIA protocol (summary)
+
+JSON text frames plus binary audio frames over one WebSocket. The watch opens with
+`{"t":"hola","token":"…","reloj":"<MAC>","v":1,"audio":"adpcm","bajada":"pcm|adpcm"}`; a conversation starts with `{"t":"inicio",…}`,
+the watch streams microphone audio (16 kHz mono, ADPCM blocks) and the server answers with text and speech audio
+(`bajada`: `pcm` or `adpcm`, negotiated per conversation). Details in
+`docs/superpowers/specs/2026-09-03-andia-diseno.md`.
+
+## Limitations
+
+A desk prototype: iPhone only (ANCS), Spanish UI, the assistant needs your own server, and the board has no case
+seal or vibration motor. Battery figures are measured on one unit.
+
+## License
+
+MIT (see `LICENSE`). Third-party material keeps its own license: see `NOTICE.md`.

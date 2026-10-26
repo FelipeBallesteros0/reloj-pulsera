@@ -11,3 +11,9 @@ respaldo/
 __pycache__/
 *.pyc
 .vscode/
+
+# Ejecutables de las pruebas en el PC (make en test_host/)
+test_host/test_*
+!test_host/test_*.c
+# Audios de prueba locales
+andia_prueba/
