@@ -62,7 +62,7 @@ static int64_t ahora_ms(void) { return esp_timer_get_time() / 1000; }
 // esta tarea con el dedo virtual; los botones y el encendido los ejecuta la tarea principal (cola_ctl).
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
-typedef enum { CTL_PWR, CTL_PWRL, CTL_ENCENDER } ctl_t;
+typedef enum { CTL_PWR, CTL_PWRL, CTL_ENCENDER, CTL_HOME } ctl_t;
 static QueueHandle_t cola_ctl;
 
 static bool ctl_pantalla(void)
@@ -94,7 +94,10 @@ static void ctl_ejecutar(const char *l)
     int a, b, c, d, e;
     char dir[8];
     ctl_t cmd;
-    if (strcmp(l, "pwr") == 0 || strcmp(l, "pwrl") == 0) {
+    if (strcmp(l, "home") == 0) {
+        cmd = CTL_HOME;
+        xQueueSend(cola_ctl, &cmd, 0);
+    } else if (strcmp(l, "pwr") == 0 || strcmp(l, "pwrl") == 0) {
         cmd = l[3] ? CTL_PWRL : CTL_PWR;
         xQueueSend(cola_ctl, &cmd, 0);
     } else if (sscanf(l, "tap %d %d", &a, &b) == 2) {
@@ -145,7 +148,7 @@ static void control_usb_iniciar(void)
     usb_serial_jtag_vfs_use_driver();
     cola_ctl = xQueueCreate(4, sizeof(ctl_t));
     xTaskCreate(tarea_control, "control_usb", 3072, NULL, 3, NULL);
-    ESP_LOGI(TAG, "control: órdenes por USB activadas (tap, swipe, drag, pwr, pwrl)");
+    ESP_LOGI(TAG, "control: órdenes por USB activadas (tap, swipe, drag, pwr, pwrl, home)");
 }
 #endif
 
@@ -729,6 +732,7 @@ void app_main(void)
         while (cola_ctl && xQueueReceive(cola_ctl, &cc, 0)) {
             if (cc == CTL_PWR) pe.pwr_corto = true;
             else if (cc == CTL_PWRL) pe.pwr_largo = true;
+            else if (cc == CTL_HOME) { pantalla_lock(0); ui_ir_reloj(); pantalla_unlock(); }
             else if (!pantalla_encendida()) encender_pantalla(MOTIVO_USUARIO);
         }
 #endif

@@ -24,7 +24,7 @@ menu "Reloj"
         default n
         help
             Lee órdenes por el USB-Serial/JTAG ("tap x y", "swipe up|down|left|right", "drag x1 y1 x2 y2 ms",
-            "pwr", "pwrl") y las ejecuta con un dedo virtual de LVGL. Instala el driver del USB-Serial/JTAG:
+            "pwr", "pwrl", "home") y las ejecuta con un dedo virtual de LVGL. Instala el driver del USB-Serial/JTAG:
             dejarlo desactivado en uso normal.
 
     config RELOJ_TZ
