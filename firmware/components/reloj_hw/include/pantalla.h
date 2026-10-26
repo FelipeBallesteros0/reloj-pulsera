@@ -22,6 +22,7 @@ bool pantalla_encendida(void);
 uint32_t pantalla_ms_sin_tocar(void);   // milisegundos desde el último toque
 bool pantalla_punto_tocado(int *x, int *y);   // true (y coordenadas) si hay un dedo apoyado ahora
 bool pantalla_toque_pendiente(void);    // true una vez por cada toque (también con la pantalla apagada)
+void pantalla_dedo_virtual(bool apretado, int x, int y);   // CONFIG_RELOJ_CONTROL_USB: segundo puntero de LVGL
 
 #ifdef __cplusplus
 }

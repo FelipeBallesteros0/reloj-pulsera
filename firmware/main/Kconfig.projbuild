@@ -19,6 +19,14 @@ menu "Reloj"
         bool "Espejar el eje X del táctil"
         default n
 
+    config RELOJ_CONTROL_USB
+        bool "Control remoto por el USB (toques y botón simulados, para grabar demos)"
+        default n
+        help
+            Lee órdenes por el USB-Serial/JTAG ("tap x y", "swipe up|down|left|right", "drag x1 y1 x2 y2 ms",
+            "pwr", "pwrl") y las ejecuta con un dedo virtual de LVGL. Instala el driver del USB-Serial/JTAG:
+            dejarlo desactivado en uso normal.
+
     config RELOJ_TZ
         string "Zona horaria (formato POSIX TZ)"
         default "<-04>4<-03>,M9.1.6/24,M4.1.6/24"

@@ -36,6 +36,18 @@ static int brillo_pct = 80;
 static bool encendida;
 static volatile bool toque_pendiente;
 static SemaphoreHandle_t sem_cuadro;   // lo da la tarea LVGL cada vez que termina de dibujar
+#ifdef CONFIG_RELOJ_CONTROL_USB
+// Dedo virtual (control remoto por USB): LVGL lo lee como un segundo táctil en cada vuelta de su temporizador.
+static volatile int16_t v_x, v_y;
+static volatile bool v_apretado;
+static void leer_virtual(lv_indev_t *i, lv_indev_data_t *d)
+{
+    (void)i;
+    d->point.x = v_x;
+    d->point.y = v_y;
+    d->state = v_apretado ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
+#endif
 
 // El CO5300 exige áreas de dibujo con inicio par y fin impar (mismo truco que usa el BSP).
 static void redondear_area(lv_event_t *e)
@@ -112,6 +124,14 @@ esp_err_t pantalla_init(void)
     indev = lvgl_port_add_touch(&tcfg);
     ESP_RETURN_ON_FALSE(indev, ESP_FAIL, TAG, "lvgl_port_add_touch");
     lv_indev_add_event_cb(indev, al_presionar, LV_EVENT_PRESSED, NULL);
+#ifdef CONFIG_RELOJ_CONTROL_USB
+    lvgl_port_lock(0);
+    lv_indev_t *v = lv_indev_create();
+    lv_indev_set_type(v, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(v, leer_virtual);
+    lv_indev_set_display(v, disp);
+    lvgl_port_unlock();
+#endif
 
     encendida = true;
     brillo_hw(brillo_pct);
@@ -128,7 +148,9 @@ void pantalla_brillo(int pct)
     if (pct > 100) pct = 100;
     brillo_pct = pct;
     if (encendida) {
+        lvgl_port_lock(0);    // el comando al panel no puede cruzarse con un dibujo de LVGL (mismo bus SPI)
         brillo_hw(pct);
+        lvgl_port_unlock();
     }
 }
 
@@ -139,9 +161,11 @@ void pantalla_apagar(void)
     if (!encendida) {
         return;
     }
+    lvgl_port_lock(0);        // sin dibujos de LVGL en vuelo mientras van los comandos por el mismo bus
     brillo_hw(0);
     esp_lcd_panel_disp_on_off(panel, false);
     comando(0x10);            // SLPIN: el controlador del panel a dormir
+    lvgl_port_unlock();
     lvgl_port_stop();         // para el tick de 5 ms (y desactiva los temporizadores)
     // Con los temporizadores desactivados lv_timer_handler devuelve "1 ms" y la tarea del port gira sin parar,
     // impidiendo el light sleep. Se reactivan con el de refresco a 1 s: con el tick congelado ninguno vence y la
@@ -163,9 +187,12 @@ void pantalla_encender(void)
     lv_timer_set_period(lv_display_get_refr_timer(disp), LV_DEF_REFR_PERIOD);
     lvgl_port_unlock();
     lvgl_port_resume();
-    comando(0x11);            // SLPOUT: el panel pide ~120 ms antes de DISPON; mientras, la tarea LVGL repinta
     int64_t t0 = esp_timer_get_time();
+    // SLPOUT dentro del candado de LVGL: si coincide con un dibujo, el envío por sondeo bloquea el bus, el dibujo
+    // falla («Cannot acquire bus when a polling transaction is in progress») y la tarea LVGL queda colgada esperando
+    // ese cuadro (lo provocaba el control remoto; con el botón también podía pasar).
     lvgl_port_lock(0);
+    comando(0x11);            // SLPOUT: el panel pide ~120 ms antes de DISPON; mientras, la tarea LVGL repinta
     lv_obj_invalidate(lv_screen_active());
     xSemaphoreTake(sem_cuadro, 0);        // descarta un cuadro anterior
     lvgl_port_unlock();
@@ -176,8 +203,10 @@ void pantalla_encender(void)
     if (falta_us > 0) {
         vTaskDelay(pdMS_TO_TICKS(falta_us / 1000 + 1));
     }
+    lvgl_port_lock(0);
     esp_lcd_panel_disp_on_off(panel, true);
     brillo_hw(brillo_pct);
+    lvgl_port_unlock();
     encendida = true;
     ESP_LOGI(TAG, "encendida en %d ms", (int)((esp_timer_get_time() - t0) / 1000));
 }
@@ -190,6 +219,17 @@ bool pantalla_toque_pendiente(void)
 }
 
 bool pantalla_encendida(void) { return encendida; }
+
+void pantalla_dedo_virtual(bool apretado, int x, int y)
+{
+#ifdef CONFIG_RELOJ_CONTROL_USB
+    v_x = (int16_t)x;
+    v_y = (int16_t)y;
+    v_apretado = apretado;
+#else
+    (void)apretado; (void)x; (void)y;
+#endif
+}
 uint32_t pantalla_ms_sin_tocar(void) { return disp ? lv_display_get_inactive_time(disp) : 0; }
 
 bool pantalla_punto_tocado(int *x, int *y)

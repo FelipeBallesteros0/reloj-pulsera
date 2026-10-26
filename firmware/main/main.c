@@ -57,6 +57,98 @@ static void log_ram(const char *momento)
 
 static int64_t ahora_ms(void) { return esp_timer_get_time() / 1000; }
 
+#ifdef CONFIG_RELOJ_CONTROL_USB
+// Control remoto por el USB-Serial/JTAG para grabar demos sin tocar el reloj (ver Kconfig). Los gestos los anima
+// esta tarea con el dedo virtual; los botones y el encendido los ejecuta la tarea principal (cola_ctl).
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
+typedef enum { CTL_PWR, CTL_PWRL, CTL_ENCENDER } ctl_t;
+static QueueHandle_t cola_ctl;
+
+static bool ctl_pantalla(void)
+{
+    if (!pantalla_encendida()) {
+        ctl_t c = CTL_ENCENDER;
+        xQueueSend(cola_ctl, &c, 0);
+        for (int i = 0; i < 40 && !pantalla_encendida(); i++) vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    return pantalla_encendida();
+}
+
+static void ctl_gesto(int x1, int y1, int x2, int y2, int ms)
+{
+    int pasos = ms / 15 > 0 ? ms / 15 : 1;
+    pantalla_dedo_virtual(true, x1, y1);
+    vTaskDelay(pdMS_TO_TICKS(80));
+    for (int i = 1; i <= pasos && ms > 0; i++) {
+        pantalla_dedo_virtual(true, x1 + (x2 - x1) * i / pasos, y1 + (y2 - y1) * i / pasos);
+        vTaskDelay(pdMS_TO_TICKS(15));
+    }
+    vTaskDelay(pdMS_TO_TICKS(60));
+    pantalla_dedo_virtual(false, x2, y2);
+}
+
+static void ctl_ejecutar(const char *l)
+{
+    int a, b, c, d, e;
+    char dir[8];
+    ctl_t cmd;
+    if (strcmp(l, "pwr") == 0 || strcmp(l, "pwrl") == 0) {
+        cmd = l[3] ? CTL_PWRL : CTL_PWR;
+        xQueueSend(cola_ctl, &cmd, 0);
+    } else if (sscanf(l, "tap %d %d", &a, &b) == 2) {
+        if (ctl_pantalla()) ctl_gesto(a, b, a, b, 0);
+    } else if (sscanf(l, "drag %d %d %d %d %d", &a, &b, &c, &d, &e) == 5) {
+        if (ctl_pantalla()) ctl_gesto(a, b, c, d, e);
+    } else if (sscanf(l, "swipe %7s", dir) == 1) {
+        if (!ctl_pantalla()) return;
+        // En vertical, por la derecha: el centro de la carátula tiene el botón de ANDIA.
+        if (strcmp(dir, "up") == 0) ctl_gesto(340, 400, 340, 120, 220);
+        else if (strcmp(dir, "down") == 0) ctl_gesto(340, 100, 340, 380, 220);
+        else if (strcmp(dir, "left") == 0) ctl_gesto(350, 251, 60, 251, 220);
+        else if (strcmp(dir, "right") == 0) ctl_gesto(60, 251, 350, 251, 220);
+        else { ESP_LOGW(TAG, "control: dirección desconocida '%s'", dir); return; }
+    } else {
+        ESP_LOGW(TAG, "control: orden desconocida '%s'", l);
+        return;
+    }
+    ESP_LOGI(TAG, "control: %s", l);
+}
+
+static void tarea_control(void *arg)
+{
+    (void)arg;
+    char linea[64];
+    int n = 0;
+    while (true) {
+        uint8_t ch;
+        if (usb_serial_jtag_read_bytes(&ch, 1, portMAX_DELAY) != 1) continue;
+        if (ch == '\r') continue;
+        if (ch != '\n') {
+            if (n < (int)sizeof(linea) - 1) linea[n++] = (char)ch;
+            continue;
+        }
+        linea[n] = 0;
+        n = 0;
+        if (linea[0]) ctl_ejecutar(linea);
+    }
+}
+
+static void control_usb_iniciar(void)
+{
+    usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    if (usb_serial_jtag_driver_install(&cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "control: no se pudo instalar el driver USB-Serial/JTAG");
+        return;
+    }
+    usb_serial_jtag_vfs_use_driver();
+    cola_ctl = xQueueCreate(4, sizeof(ctl_t));
+    xTaskCreate(tarea_control, "control_usb", 3072, NULL, 3, NULL);
+    ESP_LOGI(TAG, "control: órdenes por USB activadas (tap, swipe, drag, pwr, pwrl)");
+}
+#endif
+
 // Desde cuándo está sin cargador, para leer la descarga de una noche en "Acerca de" sin sacar cuentas.
 static int64_t t_sin_usb_ms = -1;   // -1 = con USB
 static bool sin_usb_desde_arranque; // arrancó ya sin USB: no se sabe cuándo se desconectó
@@ -568,6 +660,9 @@ void app_main(void)
     marcar_usb(pmic_usb_conectado(), true);
     refrescar_bateria();
     log_ram("con la UI creada");
+#ifdef CONFIG_RELOJ_CONTROL_USB
+    control_usb_iniciar();
+#endif
 
     ESP_ERROR_CHECK(ble_init(CONFIG_RELOJ_NOMBRE_BLE, cola));
     vTaskDelay(pdMS_TO_TICKS(300));
@@ -629,6 +724,14 @@ void app_main(void)
         if (pe.pwr_corto || pe.pwr_largo) {
             ESP_LOGI(TAG, "botón PWR %s", pe.pwr_largo ? "largo" : "corto");
         }
+#ifdef CONFIG_RELOJ_CONTROL_USB
+        ctl_t cc;
+        while (cola_ctl && xQueueReceive(cola_ctl, &cc, 0)) {
+            if (cc == CTL_PWR) pe.pwr_corto = true;
+            else if (cc == CTL_PWRL) pe.pwr_largo = true;
+            else if (!pantalla_encendida()) encender_pantalla(MOTIVO_USUARIO);
+        }
+#endif
         if (pe.pwr_corto) {
             if (pantalla_encendida()) {
                 apagar_pantalla();
