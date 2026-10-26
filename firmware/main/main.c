@@ -57,6 +57,23 @@ static void log_ram(const char *momento)
 
 static int64_t ahora_ms(void) { return esp_timer_get_time() / 1000; }
 
+// Desde cuándo está sin cargador, para leer la descarga de una noche en "Acerca de" sin sacar cuentas.
+static int64_t t_sin_usb_ms = -1;   // -1 = con USB
+static bool sin_usb_desde_arranque; // arrancó ya sin USB: no se sabe cuándo se desconectó
+static int pct_sin_usb, mv_sin_usb;
+
+static void marcar_usb(bool conectado, bool al_arrancar)
+{
+    if (conectado) {
+        t_sin_usb_ms = -1;
+    } else if (t_sin_usb_ms < 0) {
+        t_sin_usb_ms = ahora_ms();
+        sin_usb_desde_arranque = al_arrancar;
+        pct_sin_usb = pmic_bateria_pct();
+        mv_sin_usb = pmic_bateria_mv();
+    }
+}
+
 static void aplicar_hora(const struct tm *t)
 {
     struct tm copia = *t;
@@ -437,7 +454,8 @@ static void texto_hace(char *b, size_t cap, int minutos)
 // los mV y el % de hace 30 min y 2 h, para juzgar la ventana.
 static void refrescar_energia_ui(void)
 {
-    char a[24], c[24], h30[12], h120[12], r[64], t[320];
+    char a[24], c[24], h30[12], h120[12], r[64], u[112];
+    static char t[400];   // estática: la tarea main tiene poca pila
     uint32_t rs, rn;
     int rp;
     if (energia_ultimo_reposo(&rs, &rp, &rn)) {
@@ -445,13 +463,27 @@ static void refrescar_energia_ui(void)
     } else {
         r[0] = 0;
     }
+    if (t_sin_usb_ms < 0) {
+        snprintf(u, sizeof(u), "\nCon cargador");
+    } else {
+        int64_t min = (ahora_ms() - t_sin_usb_ms) / 60000;
+        int bajada = pct_sin_usb - pmic_bateria_pct();
+        char media[24] = "--";
+        if (min >= 30) {
+            int x10 = (int)(bajada * 600 / min);   // décimas de %/h
+            snprintf(media, sizeof(media), "%d,%d %%/h", x10 / 10, x10 < 0 ? -x10 % 10 : x10 % 10);
+        }
+        snprintf(u, sizeof(u), "\nSin cargador hace %d h %02d min%s, desde %d %% (%d mV) · media %s",
+                 (int)(min / 60), (int)(min % 60), sin_usb_desde_arranque ? " (desde el arranque)" : "",
+                 pct_sin_usb, mv_sin_usb, media);
+    }
     texto_descarga(a, sizeof(a), 30);
     texto_descarga(c, sizeof(c), 120);
     texto_hace(h30, sizeof(h30), 30);
     texto_hace(h120, sizeof(h120), 120);
-    snprintf(t, sizeof(t), "Modo %s desde hace %lu min%s\nBat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)\nArranque hace %lu min (%s)",
+    snprintf(t, sizeof(t), "Modo %s desde hace %lu min%s\nBat %d %% %d mV · hace 30 min %s · 2 h %s\nDescarga %s (30 min) · %s (2 h)%s\nArranque hace %lu min (%s)",
              energia_modo_nombre(energia_modo()), (unsigned long)(energia_segundos_en_modo() / 60), r,
-             pmic_bateria_pct(), pmic_bateria_mv(), h30, h120, a, c,
+             pmic_bateria_pct(), pmic_bateria_mv(), h30, h120, a, c, u,
              (unsigned long)(esp_timer_get_time() / 60000000), motivo_arranque());
     if (pantalla_encendida()) {
         pantalla_lock(0);
@@ -533,6 +565,7 @@ void app_main(void)
     ui_ajustes(aj.volumen, aj.tiempo_s, aj.sensibilidad);
     ui_vigilia(vigilia_deseada);
     pantalla_unlock();
+    marcar_usb(pmic_usb_conectado(), true);
     refrescar_bateria();
     log_ram("con la UI creada");
 
@@ -610,6 +643,7 @@ void app_main(void)
             cb_microfono();
         }
         if (pe.usb_puesto || pe.usb_quitado || pe.carga_inicio || pe.carga_fin) {
+            marcar_usb(pmic_usb_conectado(), false);
             refrescar_bateria();
             red_permitir_ahorro(!pmic_usb_conectado());
         }

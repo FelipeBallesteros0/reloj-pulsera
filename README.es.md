@@ -4,7 +4,7 @@
 
 Un firmware escrito desde cero para la placa de desarrollo con forma de reloj de Waveshare: **notificaciones del
 iPhone por BLE (ANCS)**, hora sincronizada, cliente del asistente de voz **ANDIA**, algunas apps y un trabajo de
-energía que llevó la batería de ~11,5 h a <!-- AUTONOMIA -->**(medida de una noche pendiente)**.
+energía que llevó la batería de ~11,5 h a unas **40 h estimadas** en reposo (2,5 %/h medido durante 5 h).
 
 No se reutiliza código del firmware de fábrica (lanzador esp-brookesia + XiaoZhi AI); solo el BSP oficial de la placa,
 como drivers.

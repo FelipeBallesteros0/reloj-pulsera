@@ -4,7 +4,7 @@
 
 A from-scratch firmware for Waveshare's watch-shaped ESP32-C6 dev board: **iPhone notifications over BLE (ANCS)**,
 time sync, a voice assistant client (**ANDIA**), a few apps and a power-management pass that took the board from
-~11.5 h of battery to <!-- AUTONOMIA -->**(overnight measurement pending)**.
+~11.5 h of battery to an estimated **~40 h** in standby (2.5 %/h measured over 5 h).
 
 No code from the factory firmware (esp-brookesia launcher + XiaoZhi AI) is reused; only the official board support
 package (BSP) is used, as drivers.
