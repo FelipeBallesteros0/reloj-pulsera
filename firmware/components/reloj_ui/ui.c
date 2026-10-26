@@ -689,11 +689,24 @@ static void abrir_seccion(seccion_t s)
         pintar_wifi();
         texto_col(F16, GRIS(), "En casa el reloj habla con la Pi por la LAN; fuera, por el túnel.", 240);
         break;
-    case SEC_ACERCA:
+    case SEC_ACERCA: {
+        // Diez líneas no caben entre la cabecera y el arco inferior: van en un contenedor que se desplaza.
+        lv_obj_t *cont = lv_obj_create(scr_sub);
+        lv_obj_set_size(cont, ANCHO, ALTO - 90);
+        lv_obj_align(cont, LV_ALIGN_TOP_MID, 0, 90);
+        lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(cont, 0, 0);
+        lv_obj_set_style_pad_hor(cont, COL_X, 0);
+        lv_obj_set_style_pad_top(cont, 6, 0);
+        lv_obj_set_style_pad_bottom(cont, 90, 0);   // la última línea puede subir por encima del arco inferior
+        lv_obj_set_scroll_dir(cont, LV_DIR_VER);
         texto_acerca(buf, sizeof(buf));
-        sub_acerca = texto_col(F20, lv_color_white(), buf, 96);
+        sub_acerca = etiqueta(cont, F20, lv_color_white(), buf);
+        lv_obj_set_width(sub_acerca, ANCHO - 2 * COL_X);
+        lv_label_set_long_mode(sub_acerca, LV_LABEL_LONG_MODE_WRAP);
         lv_obj_set_style_text_line_space(sub_acerca, 8, 0);
         break;
+    }
     case SEC_APAGAR:
         texto_col(F16, GRIS(), "El reloj se apaga por completo (Bluetooth, WiFi y pantalla). Para encenderlo, "
                                "mantén el botón lateral.", 96);
